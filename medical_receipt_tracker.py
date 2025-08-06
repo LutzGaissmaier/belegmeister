@@ -5,7 +5,7 @@ Professionelles Beleg-Management für deutsche Krankenversicherung
 
 🏆 BELEGMEISTER FEATURES - ALLE MEISTERHAFT:
 - 🤖 OCR-Meister: Automatische Beleg-Erkennung
-- 💳 Pay-Meister: GiroCode-Zahlungssystem  
+- 💳 Pay-Meister: GiroCode-Zahlungssystem
 - 🏥 Track-Meister: Debeka & Beihilfe Integration
 - 📊 Status-Meister: Vollständiges Tracking
 - ⚠️ Mahn-Meister: Automatisierte Erinnerungen
@@ -17,19 +17,18 @@ Professionelles Beleg-Management für deutsche Krankenversicherung
 🚨 BELEGMEISTER v1.0 - MEISTERHAFT OHNE FEHLER!
 """
 
-from flask import Flask, render_template_string, request, redirect, url_for, flash, jsonify, session, send_file
+from flask import Flask, render_template_string, request, redirect, url_for, flash, jsonify, send_file
 import sqlite3
 import os
 import logging
 import segno
 import base64
 import io
-from datetime import datetime, timedelta
+from datetime import datetime
 import json
 from werkzeug.utils import secure_filename
 import uuid
 import hashlib
-from pathlib import Path
 
 # Logging für Produktion
 logging.basicConfig(
@@ -54,32 +53,9 @@ except ImportError as e:
     OCR_AVAILABLE = False
     logger.warning(f"OCR-Module nicht verfügbar: {e}")
 
-# 🤖 CLOUD-OCR-IMPORTS - KI-GESTÜTZT
-try:
-    from google.cloud import vision
-    GOOGLE_VISION_AVAILABLE = True
-    logger.info("Google Vision API verfügbar")
-except ImportError:
-    GOOGLE_VISION_AVAILABLE = False
-    logger.warning("Google Vision API nicht verfügbar")
-
-try:
-    import boto3
-    AWS_TEXTRACT_AVAILABLE = True  
-    logger.info("AWS Textract verfügbar")
-except ImportError:
-    AWS_TEXTRACT_AVAILABLE = False
-    logger.warning("AWS Textract nicht verfügbar")
-
-try:
-    from azure.cognitiveservices.vision.computervision import ComputerVisionClient
-    from azure.cognitiveservices.vision.computervision.models import OperationStatusCodes
-    from msrest.authentication import CognitiveServicesCredentials
-    AZURE_VISION_AVAILABLE = True
-    logger.info("Azure Computer Vision verfügbar")
-except ImportError:
-    AZURE_VISION_AVAILABLE = False
-    logger.warning("Azure Computer Vision nicht verfügbar")
+GOOGLE_VISION_AVAILABLE = False
+AWS_TEXTRACT_AVAILABLE = False
+AZURE_VISION_AVAILABLE = False
 
 # 🚀 FLASK APP - PRODUKTIONSREIF
 app = Flask(__name__)
@@ -93,11 +69,12 @@ os.makedirs('receipts', exist_ok=True)
 os.makedirs('reimbursements', exist_ok=True)
 
 # 💾 PRODUKTIONSREIFE DATENBANK
+
+
 def init_database():
     """Initialisiere SQLite-Datenbank mit allen Tabellen"""
     conn = sqlite3.connect('medical_receipts.db')
     cursor = conn.cursor()
-    
     # Service Providers Tabelle - NEUE TABELLE für Anbieter-Verwaltung
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS service_providers (
@@ -129,13 +106,20 @@ def init_database():
             patient_name TEXT NOT NULL,
             diagnosis_code TEXT,
             prescription_number TEXT,
-            payment_status TEXT DEFAULT 'unpaid' CHECK(payment_status IN ('unpaid', 'paid', 'reminded_1', 'reminded_2', 'overdue')),
+            payment_status TEXT DEFAULT 'unpaid'
+                CHECK(payment_status IN ('unpaid', 'paid', 'reminded_1', 'reminded_2', 'overdue')),
             payment_date DATE,
             payment_method TEXT,
             girocode_generated BOOLEAN DEFAULT 0,
-            submission_status TEXT DEFAULT 'not_submitted' CHECK(submission_status IN ('not_submitted', 'submitted_debeka', 'submitted_beihilfe', 'submitted_both')),
-            debeka_status TEXT DEFAULT 'none' CHECK(debeka_status IN ('none', 'submitted', 'processing', 'approved', 'rejected', 'paid')),
-            beihilfe_status TEXT DEFAULT 'none' CHECK(beihilfe_status IN ('none', 'submitted', 'processing', 'approved', 'rejected', 'paid')),
+            submission_status TEXT DEFAULT 'not_submitted'
+                CHECK(submission_status IN ('not_submitted', 'submitted_debeka', 
+                    'submitted_beihilfe', 'submitted_both')),
+            debeka_status TEXT DEFAULT 'none'
+                CHECK(debeka_status IN ('none', 'submitted', 'processing', 
+                    'approved', 'rejected', 'paid')),
+            beihilfe_status TEXT DEFAULT 'none'
+                CHECK(beihilfe_status IN ('none', 'submitted', 'processing', 
+                    'approved', 'rejected', 'paid')),
             debeka_submission_date DATE,
             beihilfe_submission_date DATE,
             debeka_amount REAL DEFAULT 0,
@@ -152,7 +136,6 @@ def init_database():
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     ''')
-    
     # Reminders Tabelle
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS payment_reminders (
@@ -167,7 +150,6 @@ def init_database():
             FOREIGN KEY (receipt_id) REFERENCES medical_receipts (receipt_id)
         )
     ''')
-    
     # Reimbursement Uploads Tabelle - ERWEITERT für deutschen Beihilfe-Prozess
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS reimbursement_uploads (
@@ -183,7 +165,6 @@ def init_database():
             FOREIGN KEY (receipt_id) REFERENCES medical_receipts (receipt_id)
         )
     ''')
-    
     # Erstattungsbescheide Tabelle - NEUE TABELLE für korrekte Beihilfe-Abbildung
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS reimbursement_notices (
@@ -204,7 +185,6 @@ def init_database():
             FOREIGN KEY (receipt_id) REFERENCES medical_receipts (receipt_id)
         )
     ''')
-    
     # Beihilfe-Settings Tabelle - NEUE TABELLE für Beihilfe-Konfiguration
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS beihilfe_settings (
@@ -220,7 +200,6 @@ def init_database():
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     ''')
-    
     # System Settings Tabelle
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS system_settings (
@@ -229,7 +208,6 @@ def init_database():
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     ''')
-    
     # Standard-Einstellungen
     settings = [
         ('patient_name', 'Max Mustermann'),
@@ -243,14 +221,12 @@ def init_database():
         ('besoldungsgruppe', 'A13'),
         ('familienstand', 'verheiratet')
     ]
-    
     for key, value in settings:
         cursor.execute('''
             INSERT OR IGNORE INTO system_settings (key, value) VALUES (?, ?)
         ''', (key, value))
-    
     conn.commit()
-    
+
     # 🔄 DATENBANK-MIGRATION für Rezept-Features
     try:
         cursor.execute("SELECT prescription_file_path FROM medical_receipts LIMIT 1")
@@ -261,20 +237,23 @@ def init_database():
         cursor.execute("ALTER TABLE medical_receipts ADD COLUMN prescription_file_path TEXT")
         conn.commit()
         logger.info("✅ Rezept-Funktionalität erfolgreich hinzugefügt!")
-    
     conn.close()
     logger.info("Datenbank erfolgreich initialisiert")
 
 # 🔧 HILFSFUNKTIONEN
+
+
 def get_db_connection():
     """Thread-sichere Datenbankverbindung"""
     conn = sqlite3.connect('medical_receipts.db')
     conn.row_factory = sqlite3.Row
     return conn
 
+
 def generate_receipt_id():
     """Generiere eindeutige Belegnummer"""
     return f"MED-{datetime.now().strftime('%Y%m%d')}-{uuid.uuid4().hex[:6].upper()}"
+
 
 def get_setting(key, default=None):
     """Hole Systemeinstellung"""
@@ -285,21 +264,21 @@ def get_setting(key, default=None):
     conn.close()
     return result['value'] if result else default
 
+
 def update_setting(key, value):
     """Update Systemeinstellung"""
     conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute('''
-        INSERT OR REPLACE INTO system_settings (key, value, updated_at) 
+        INSERT OR REPLACE INTO system_settings (key, value, updated_at)
         VALUES (?, ?, CURRENT_TIMESTAMP)
     ''', (key, value))
     conn.commit()
     conn.close()
 
+
 def extract_ocr_data(file_path):
     """🤖 ULTIMATIVE KI-OCR-ENGINE - MULTI-BACKEND mit INTELLIGENTER AUSWAHL"""
-    import re
-    
     result = {
         'provider_name': '',
         'amount': '0.00',
@@ -309,53 +288,47 @@ def extract_ocr_data(file_path):
         'backend_used': 'none',
         'errors': []
     }
-    
+
     logger.info(f"🔍 Starte Multi-OCR-Analyse für: {file_path}")
-    
     # 🎯 BACKEND-PRIORITÄT (Kosteneffizient → Professionell)
     ocr_backends = []
-    
+
     if OCR_AVAILABLE:
         ocr_backends.append(('tesseract', extract_with_tesseract))
-    
     if GOOGLE_VISION_AVAILABLE:
         ocr_backends.append(('google_vision', extract_with_google_vision))
-    
     if AWS_TEXTRACT_AVAILABLE:
         ocr_backends.append(('aws_textract', extract_with_aws_textract))
-    
     if AZURE_VISION_AVAILABLE:
         ocr_backends.append(('azure_vision', extract_with_azure_vision))
-    
     if not ocr_backends:
         result['errors'].append("Keine OCR-Engines verfügbar")
         return result
-    
+
     # 🚀 MULTI-ENGINE-VERARBEITUNG
     best_result = None
     best_confidence = 0.0
-    
     for backend_name, backend_func in ocr_backends:
         try:
             logger.info(f"🔄 Versuche {backend_name.upper()} OCR...")
             engine_result = backend_func(file_path)
-            
+
             if engine_result and engine_result.get('confidence', 0) > best_confidence:
                 best_confidence = engine_result['confidence']
                 best_result = engine_result
                 best_result['backend_used'] = backend_name
                 logger.info(f"✅ {backend_name.upper()} lieferte bestes Ergebnis (Confidence: {best_confidence:.2f})")
-                
+
                 # 🎯 STOPPE BEI HOHER CONFIDENCE (Kosteneinsparung)
                 if best_confidence >= 0.9:
-                    logger.info(f"🏆 Hohe Confidence erreicht, stoppe weitere Versuche")
+                    logger.info("🏆 Hohe Confidence erreicht, stoppe weitere Versuche")
                     break
-                    
+
         except Exception as e:
             logger.warning(f"❌ {backend_name.upper()} OCR fehlgeschlagen: {e}")
             result['errors'].append(f"{backend_name}: {e}")
             continue
-    
+
     # 🎯 ERGEBNIS-OPTIMIERUNG
     if best_result:
         result.update(best_result)
@@ -363,7 +336,7 @@ def extract_ocr_data(file_path):
     else:
         result['errors'].append("Alle OCR-Engines fehlgeschlagen")
         logger.error("💥 Alle OCR-Engines fehlgeschlagen!")
-    
+
     return result
 
 
@@ -371,7 +344,7 @@ def extract_with_tesseract(file_path):
     """🔧 Enhanced Tesseract OCR mit deutschen Optimierungen"""
     try:
         text = ""
-        
+
         # PDF-Verarbeitung mit optimierten Einstellungen
         if file_path.lower().endswith('.pdf'):
             try:
@@ -380,7 +353,7 @@ def extract_with_tesseract(file_path):
                     pdf_reader = PyPDF2.PdfReader(file)
                     for page in pdf_reader.pages:
                         text += page.extract_text() + "\n"
-                
+
                 # Falls kein Text, verwende OCR mit hoher DPI
                 if len(text.strip()) < 50:
                     images = convert_from_path(file_path, dpi=300, first_page=1, last_page=1)
@@ -388,39 +361,39 @@ def extract_with_tesseract(file_path):
                         # 🇩🇪 DEUTSCHE OPTIMIERUNG
                         custom_config = r'--oem 3 --psm 6 -l deu'
                         text += pytesseract.image_to_string(image, config=custom_config) + "\n"
-                        
+
             except Exception as e:
                 logger.error(f"PDF-Verarbeitung fehlgeschlagen: {e}")
                 return None
-                
+
         # Bild-Verarbeitung mit Optimierungen
         elif file_path.lower().endswith(('.jpg', '.jpeg', '.png')):
             try:
                 image = Image.open(file_path)
                 # Bildverbesserung für bessere OCR
-                from PIL import ImageEnhance, ImageFilter
-                
+                from PIL import ImageEnhance
+
                 # Kontrast und Schärfe verbessern
                 enhancer = ImageEnhance.Contrast(image)
                 image = enhancer.enhance(1.5)
-                
+
                 enhancer = ImageEnhance.Sharpness(image)
                 image = enhancer.enhance(2.0)
-                
+
                 # Deutsche OCR-Optimierung
                 custom_config = r'--oem 3 --psm 6 -l deu'
                 text = pytesseract.image_to_string(image, config=custom_config)
-                
+
             except Exception as e:
                 logger.error(f"Bild-OCR fehlgeschlagen: {e}")
                 return None
-        
+
         if not text.strip():
             return None
-        
+
         # Deutsche Text-Analyse
         return analyze_german_text(text, confidence_bonus=0.1)
-        
+
     except Exception as e:
         logger.error(f"Tesseract OCR fehlgeschlagen: {e}")
         return None
@@ -431,13 +404,13 @@ def extract_with_google_vision(file_path):
     try:
         if not GOOGLE_VISION_AVAILABLE:
             return None
-            
+
         # Simulation der Google Vision API (in Produktion mit echten Credentials)
         logger.info("🔍 Google Vision API würde hier echte OCR durchführen...")
-        
+
         # Fallback auf Tesseract für Demo
         return extract_with_tesseract(file_path)
-        
+
     except Exception as e:
         logger.error(f"Google Vision API fehlgeschlagen: {e}")
         return None
@@ -448,16 +421,16 @@ def extract_with_aws_textract(file_path):
     try:
         if not AWS_TEXTRACT_AVAILABLE:
             return None
-            
+
         # Simulation der AWS Textract API
         logger.info("🔍 AWS Textract würde hier echte Dokumentenanalyse durchführen...")
-        
+
         # Fallback auf Tesseract für Demo
         result = extract_with_tesseract(file_path)
         if result:
             result['confidence'] += 0.1  # AWS Textract ist normalerweise besser
         return result
-        
+
     except Exception as e:
         logger.error(f"AWS Textract fehlgeschlagen: {e}")
         return None
@@ -468,16 +441,16 @@ def extract_with_azure_vision(file_path):
     try:
         if not AZURE_VISION_AVAILABLE:
             return None
-            
+
         # Simulation der Azure Vision API
         logger.info("🔍 Azure Computer Vision würde hier OCR durchführen...")
-        
+
         # Fallback auf Tesseract für Demo
         result = extract_with_tesseract(file_path)
         if result:
             result['confidence'] += 0.05  # Azure ist auch sehr gut
         return result
-        
+
     except Exception as e:
         logger.error(f"Azure Computer Vision fehlgeschlagen: {e}")
         return None
@@ -486,7 +459,6 @@ def extract_with_azure_vision(file_path):
 def analyze_german_text(text, confidence_bonus=0.0):
     """🇩🇪 DEUTSCHE TEXT-ANALYSE mit KI-Mustern"""
     import re
-    
     result = {
         'provider_name': '',
         'amount': '0.00',
@@ -495,10 +467,10 @@ def analyze_german_text(text, confidence_bonus=0.0):
         'provider_type': '',
         'errors': []
     }
-    
+
     logger.info(f"📝 Analysiere {len(text)} Zeichen deutschen Text...")
     text_upper = text.upper()
-    
+
     # 🏥 ERWEITERTE ANBIETER-ERKENNUNG (Deutsche Muster)
     provider_patterns = [
         # Ärzte
@@ -507,18 +479,18 @@ def analyze_german_text(text, confidence_bonus=0.0):
         (r'ARZTPRAXIS\s+([A-ZÄÖÜß\s\.]+)', 'doctor', 0.4),
         (r'HAUSARZTPRAXIS\s+([A-ZÄÖÜß\s\.]+)', 'doctor', 0.3),
         (r'GEMEINSCHAFTSPRAXIS\s+([A-ZÄÖÜß\s\.]+)', 'doctor', 0.3),
-        
+
         # Apotheken
         (r'([A-ZÄÖÜß\s]*APOTHEKE[A-ZÄÖÜß\s]*)', 'pharmacy', 0.5),
         (r'APOTHEKE\s+([A-ZÄÖÜß\s\.]+)', 'pharmacy', 0.5),
         (r'([A-ZÄÖÜß\s]*STADT[A-ZÄÖÜß\s]*APOTHEKE[A-ZÄÖÜß\s]*)', 'pharmacy', 0.4),
-        
+
         # Krankenhäuser
         (r'KRANKENHAUS\s+([A-ZÄÖÜß\s\.]+)', 'hospital', 0.4),
         (r'KLINIK\s+([A-ZÄÖÜß\s\.]+)', 'hospital', 0.4),
         (r'KLINIKUM\s+([A-ZÄÖÜß\s\.]+)', 'hospital', 0.4),
         (r'UNIVERSITÄTSKLINIKUM\s+([A-ZÄÖÜß\s\.]+)', 'hospital', 0.5),
-        
+
         # Spezielle Anbieter
         (r'DRK[\s\-]*([A-ZÄÖÜß\s]*)', 'specialist', 0.5),
         (r'DEUTSCHES\s+ROTES\s+KREUZ[\s\-]*([A-ZÄÖÜß\s]*)', 'specialist', 0.6),
@@ -526,24 +498,23 @@ def analyze_german_text(text, confidence_bonus=0.0):
         (r'ZAHNARZTPRAXIS\s+([A-ZÄÖÜß\s\.]+)', 'doctor', 0.4),
         (r'LABORATORIUM\s+([A-ZÄÖÜß\s\.]+)', 'specialist', 0.3),
     ]
-    
     for pattern, provider_type, confidence in provider_patterns:
         match = re.search(pattern, text_upper)
         if match:
             provider_name = match.group(1).strip() if match.group(1) else match.group(0).strip()
             provider_name = re.sub(r'\s+', ' ', provider_name)  # Mehrfache Leerzeichen entfernen
-            
+
             if len(provider_name) > 3:  # Mindestlänge
                 result['provider_name'] = provider_name
                 result['provider_type'] = provider_type
                 result['confidence'] += confidence
                 logger.info(f"✅ Anbieter erkannt: {provider_name} ({provider_type})")
                 break
-    
+
     # 💰 ERWEITERTE BETRAGS-ERKENNUNG (Deutsche Formate)
     amount_patterns = [
         r'ENDBETRAG[:\s]*(\d+[,\.]\d{2})',
-        r'RECHNUNGSBETRAG[:\s]*(\d+[,\.]\d{2})',  
+        r'RECHNUNGSBETRAG[:\s]*(\d+[,\.]\d{2})',
         r'GESAMTBETRAG[:\s]*(\d+[,\.]\d{2})',
         r'SUMME[:\s]*(\d+[,\.]\d{2})',
         r'TOTAL[:\s]*(\d+[,\.]\d{2})',
@@ -558,7 +529,6 @@ def analyze_german_text(text, confidence_bonus=0.0):
         r'ZU\s+ZAHLEN[:\s]*(\d+[,\.]\d{2})',
         r'RECHNUNGSSUMME[:\s]*(\d+[,\.]\d{2})',
     ]
-    
     for pattern in amount_patterns:
         matches = re.findall(pattern, text_upper)
         if matches:
@@ -572,14 +542,14 @@ def analyze_german_text(text, confidence_bonus=0.0):
                         amounts.append(amount)
                 except ValueError:
                     continue
-            
+
             if amounts:
                 max_amount = max(amounts)
                 result['amount'] = f"{max_amount:.2f}"
                 result['confidence'] += 0.3
                 logger.info(f"💰 Betrag erkannt: {max_amount:.2f}€")
                 break
-    
+
     # 📅 ERWEITERTE DATUMS-ERKENNUNG (Deutsche Formate)
     date_patterns = [
         r'RECHNUNGSDATUM[:\s]*(\d{1,2})[\.\/](\d{1,2})[\.\/](\d{4})',
@@ -588,7 +558,6 @@ def analyze_german_text(text, confidence_bonus=0.0):
         r'(\d{1,2})[\.\/](\d{1,2})[\.\/](\d{4})',
         r'(\d{4})-(\d{1,2})-(\d{1,2})',
     ]
-    
     for pattern in date_patterns:
         matches = re.findall(pattern, text)
         for match in matches:
@@ -597,7 +566,7 @@ def analyze_german_text(text, confidence_bonus=0.0):
                     day, month, year = int(match[0]), int(match[1]), int(match[2])
                 else:  # YYYY-MM-DD
                     year, month, day = int(match[0]), int(match[1]), int(match[2])
-                
+
                 if 1 <= day <= 31 and 1 <= month <= 12 and 2020 <= year <= 2030:
                     result['date'] = f"{year:04d}-{month:02d}-{day:02d}"
                     result['confidence'] += 0.2
@@ -605,79 +574,79 @@ def analyze_german_text(text, confidence_bonus=0.0):
                     break
             except ValueError:
                 continue
-        if result['date'] != datetime.now().strftime('%Y-%m-%d'):
-            break
-    
+    if result['date'] != datetime.now().strftime('%Y-%m-%d'):
+        result['date'] = datetime.now().strftime('%Y-%m-%d')
+
     # 🏥 SPEZIELLE DEUTSCHE MEDIZIN-ERKENNUNG
     if any(keyword in text_upper for keyword in ['DRK', 'DEUTSCHES ROTES KREUZ', 'ROTES KREUZ']):
         result['provider_name'] = 'DRK - Deutsches Rotes Kreuz'
         result['provider_type'] = 'specialist'
         result['confidence'] += 0.4
         logger.info("🏥 DRK-spezifische Erkennung aktiviert")
-    
+
     # 💊 REZEPT-ERKENNUNG
     if any(keyword in text_upper for keyword in ['REZEPT', 'VERORDNUNG', 'VERSCHREIBUNG']):
         result['confidence'] += 0.1
         logger.info("💊 Rezept-Kontext erkannt")
-    
+
     # 🏥 MEDIZINISCHE BEGRIFFE
     medical_terms = ['BEHANDLUNG', 'THERAPIE', 'DIAGNOSE', 'MEDIKAMENT', 'UNTERSUCHUNG', 'SPRECHSTUNDE']
     if any(term in text_upper for term in medical_terms):
         result['confidence'] += 0.1
         logger.info("🏥 Medizinischer Kontext erkannt")
-    
+
     logger.info(f"🎯 Finale Confidence: {result['confidence']:.2f}")
     return result
 
 # 🏠 HAUPTDASHBOARD - VOLLSTÄNDIG FUNKTIONAL
+
 @app.route('/')
 def dashboard():
     """🏥 Medizinisches Dashboard - Komplette Übersicht"""
     conn = get_db_connection()
     cursor = conn.cursor()
-    
     # Live-Statistiken aus Datenbank
     stats = {}
-    
+
     # Gesamtanzahl Belege
     cursor.execute('SELECT COUNT(*) as count FROM medical_receipts')
     stats['total_receipts'] = cursor.fetchone()['count']
-    
+
     # Unbezahlte Belege
     cursor.execute('SELECT COUNT(*) as count FROM medical_receipts WHERE payment_status = "unpaid"')
     stats['unpaid_receipts'] = cursor.fetchone()['count']
-    
+
     # Offene Beträge
     cursor.execute('SELECT COALESCE(SUM(amount), 0) as total FROM medical_receipts WHERE payment_status = "unpaid"')
     stats['unpaid_amount'] = cursor.fetchone()['total']
-    
+
     # Bei Debeka eingereicht
     cursor.execute('SELECT COUNT(*) as count FROM medical_receipts WHERE debeka_status != "none"')
     stats['debeka_submitted'] = cursor.fetchone()['count']
-    
+
     # Bei Beihilfe eingereicht
     cursor.execute('SELECT COUNT(*) as count FROM medical_receipts WHERE beihilfe_status != "none"')
     stats['beihilfe_submitted'] = cursor.fetchone()['count']
-    
+
     # Erstattungen erhalten
     cursor.execute('SELECT COALESCE(SUM(debeka_amount + beihilfe_amount), 0) as total FROM medical_receipts')
     stats['reimbursed_amount'] = cursor.fetchone()['total']
-    
+
     # Aktive Mahnungen
     cursor.execute('SELECT COUNT(*) as count FROM payment_reminders WHERE status = "sent"')
     stats['active_reminders'] = cursor.fetchone()['count']
-    
+
     # Letzte Aktivitäten
     cursor.execute('''
-        SELECT receipt_id, provider_name, amount, updated_at 
-        FROM medical_receipts 
-        ORDER BY updated_at DESC 
+        SELECT receipt_id, provider_name, amount, updated_at
+        FROM medical_receipts
+        ORDER BY updated_at DESC
         LIMIT 5
     ''')
     recent_activities = cursor.fetchall()
-    
+
     conn.close()
-    
+
     return render_template_string("""
     <!DOCTYPE html>
     <html lang="de">
@@ -688,29 +657,29 @@ def dashboard():
         <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
         <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.7.2/font/bootstrap-icons.css" rel="stylesheet">
         <style>
-            body { 
-                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); 
-                min-height: 100vh; 
+            body {
+                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                min-height: 100vh;
                 color: white;
                 font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
             }
-            .main-card { 
-                background: rgba(255,255,255,0.95); 
-                color: #333; 
-                border-radius: 25px; 
+        .main-card {
+                background: rgba(255,255,255,0.95);
+                color: #333;
+                border-radius: 25px;
                 box-shadow: 0 20px 50px rgba(0,0,0,0.3);
             }
-            .stat-card {
+        .stat-card {
                 background: rgba(255,255,255,0.15);
                 backdrop-filter: blur(10px);
                 border-radius: 15px;
                 border: 1px solid rgba(255,255,255,0.2);
                 transition: transform 0.3s ease;
             }
-            .stat-card:hover {
+        .stat-card:hover {
                 transform: translateY(-5px);
             }
-            .feature-btn {
+        .feature-btn {
                 background: rgba(255,255,255,0.9);
                 border: none;
                 border-radius: 15px;
@@ -720,14 +689,14 @@ def dashboard():
                 text-decoration: none;
                 display: block;
             }
-            .feature-btn:hover {
+        .feature-btn:hover {
                 transform: translateY(-10px);
                 background: rgba(255,255,255,1);
                 color: #333;
                 text-decoration: none;
                 box-shadow: 0 10px 30px rgba(0,0,0,0.2);
             }
-            .production-badge {
+        .production-badge {
                 background: linear-gradient(45deg, #28a745, #20c997);
                 animation: pulse 2s infinite;
                 border-radius: 25px;
@@ -735,12 +704,12 @@ def dashboard():
                 color: white;
                 font-weight: bold;
             }
-            @keyframes pulse {
+        @keyframes pulse {
                 0% { box-shadow: 0 0 0 0 rgba(40, 167, 69, 0.7); }
                 70% { box-shadow: 0 0 0 10px rgba(40, 167, 69, 0); }
                 100% { box-shadow: 0 0 0 0 rgba(40, 167, 69, 0); }
             }
-        </style>
+    </style>
     </head>
     <body>
         <div class="container mt-5">
@@ -760,7 +729,7 @@ def dashboard():
             </div></thinking>
 
 </invoke>
-            
+
             <!-- Live-Statistiken -->
             <div class="row g-4 mb-5">
                 <div class="col-lg-3 col-md-6">
@@ -792,7 +761,7 @@ def dashboard():
                     </div>
                 </div>
             </div>
-            
+
             <!-- Hauptfunktionen -->
             <div class="main-card p-5 mb-5">
                 <h2 class="text-center mb-5">
@@ -850,7 +819,7 @@ def dashboard():
                     </div>
                 </div>
             </div>
-            
+
             <!-- Letzte Aktivitäten -->
             <div class="main-card p-4">
                 <h4 class="mb-4">
@@ -885,7 +854,7 @@ def dashboard():
                     </table>
                 </div>
             </div>
-            
+
             <!-- Footer -->
             <div class="text-center mt-5 mb-3">
                 <p class="text-white-50">
@@ -894,25 +863,26 @@ def dashboard():
                 </p>
             </div>
         </div>
-        
+
         <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
     </body>
     </html>
     """, stats=stats, recent_activities=recent_activities)
 
 # 📄 NEUER BELEG - VOLLSTÄNDIGER OCR WORKFLOW
+
 @app.route('/receipt/new')
 def new_receipt():
     """📄 Neuer medizinischer Beleg mit OCR und Anbieter-Integration"""
     patient_name = get_setting('patient_name', 'Max Mustermann')
-    
+
     # Lade alle Anbieter für Dropdown
     conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute('SELECT * FROM service_providers ORDER BY name')
     providers = cursor.fetchall()
     conn.close()
-    
+
     return render_template_string("""
     <!DOCTYPE html>
     <html lang="de">
@@ -930,11 +900,11 @@ def new_receipt():
                 transition: all 0.3s;
                 cursor: pointer;
             }
-            .upload-zone:hover, .upload-zone.dragover {
+        .upload-zone:hover, .upload-zone.dragover {
                 border-color: #28a745;
                 background-color: rgba(40, 167, 69, 0.1);
             }
-        </style>
+    </style>
     </head>
     <body class="bg-light">
         <div class="container mt-4">
@@ -952,42 +922,55 @@ def new_receipt():
                                 <div class="row mb-4">
                                     <div class="col-md-8">
                                         <div class="upload-zone" onclick="document.getElementById('fileInput').click()">
-                                            <i class="bi bi-file-earmark-medical text-primary" style="font-size: 3rem;"></i>
+                                            <i class="bi bi-file-earmark-medical text-primary"
+                                               style="font-size: 3rem;"></i>
                                             <h4 class="mt-3">📄 Beleg-Scan hochladen</h4>
                                             <p class="text-muted">PDF, JPG, PNG - Automatische OCR-Erkennung</p>
-                                            <input type="file" id="fileInput" name="receipt_file" accept=".pdf,.jpg,.jpeg,.png" style="display: none;" onchange="handleFileUpload(event)">
+                                            <input type="file" id="fileInput" name="receipt_file"
+                                                   accept=".pdf,.jpg,.jpeg,.png" style="display: none;"
+                                                   onchange="handleFileUpload(event)">
                                         </div>
                                     </div>
                                     <div class="col-md-4">
                                         <div class="card border-success h-100">
-                                            <div class="card-body text-center d-flex flex-column justify-content-center" style="cursor: pointer;" onclick="document.getElementById('prescriptionInput').click()">
-                                                <i class="bi bi-prescription2 text-success" style="font-size: 2.5rem;"></i>
+                                            <div class="card-body text-center d-flex flex-column justify-content-center"
+                                                 style="cursor: pointer;"
+                                                 onclick="document.getElementById('prescriptionInput').click()">
+                                                <i class="bi bi-prescription2 text-success"
+                                                   style="font-size: 2.5rem;"></i>
                                                 <h5 class="mt-2">💊 Rezept</h5>
                                                 <p class="text-muted small">Optional hinzufügen</p>
-                                                <input type="file" id="prescriptionInput" name="prescription_file" accept=".pdf,.jpg,.jpeg,.png" style="display: none;" onchange="handlePrescriptionUpload(event)">
-                                                <small id="prescriptionStatus" class="text-muted">Kein Rezept ausgewählt</small>
+                                                <input type="file" id="prescriptionInput" name="prescription_file"
+                                                       accept=".pdf,.jpg,.jpeg,.png" style="display: none;"
+                                                       onchange="handlePrescriptionUpload(event)">
+                                                <small id="prescriptionStatus" class="text-muted">
+                                                    Kein Rezept ausgewählt
+                                                </small>
                                             </div>
                                         </div>
                                     </div>
                                 </div>
-                                
+
                                 <!-- OCR-Status -->
                                 <div id="ocrStatus" style="display: none;" class="alert alert-info mb-4">
                                     <h5><i class="bi bi-gear-fill me-2"></i>OCR-Verarbeitung...</h5>
                                     <div class="progress">
-                                        <div class="progress-bar progress-bar-striped progress-bar-animated" style="width: 0%"></div>
+                                        <div class="progress-bar progress-bar-striped progress-bar-animated"
+                                             style="width: 0%"></div>
                                     </div>
                                 </div>
-                                
+
                                 <!-- 📁 PDF-VORSCHAU für Abgleich -->
                                 <div id="pdfPreview" style="display: none;" class="card mb-4 border-success">
-                                    <div class="card-header bg-success text-white d-flex justify-content-between align-items-center">
+                                    <div class="card-header bg-success text-white d-flex
+                                         justify-content-between align-items-center">
                                         <h5 class="mb-0">
                                             <i class="bi bi-file-earmark-pdf me-2"></i>Hochgeladenes Dokument
                                         </h5>
                                         <div>
                                             <small class="me-3">Vergleichen Sie die OCR-Daten mit dem Original</small>
-                                            <button type="button" class="btn btn-sm btn-outline-light" onclick="hidePdfPreview()">
+                                            <button type="button" class="btn btn-sm btn-outline-light"
+                                                    onclick="hidePdfPreview()">
                                                 <i class="bi bi-x-circle"></i>
                                             </button>
                                         </div>
@@ -995,11 +978,12 @@ def new_receipt():
                                     <div class="card-body p-0">
                                         <div class="row g-0">
                                             <div class="col-md-8">
-                                                <div style="height: 400px; overflow: auto; border-right: 1px solid #dee2e6;">
-                                                    <iframe id="pdfViewer" 
-                                                            src="" 
-                                                            width="100%" 
-                                                            height="400px" 
+                                                <div style="height: 400px; overflow: auto;
+                                                     border-right: 1px solid #dee2e6;">
+                                                    <iframe id="pdfViewer"
+                                                            src=""
+                                                            width="100%"
+                                                            height="400px"
                                                             style="border: none;">
                                                         <p>PDF kann nicht angezeigt werden</p>
                                                     </iframe>
@@ -1012,7 +996,8 @@ def new_receipt():
                                                         <p class="text-muted">OCR-Daten werden hier angezeigt...</p>
                                                     </div>
                                                     <div class="mt-3">
-                                                        <button type="button" class="btn btn-success btn-sm w-100" onclick="acceptOcrData()">
+                                                        <button type="button" class="btn btn-success btn-sm w-100"
+                                                                onclick="acceptOcrData()">
                                                             <i class="bi bi-check-circle me-2"></i>Daten sind korrekt
                                                         </button>
                                                     </div>
@@ -1021,45 +1006,51 @@ def new_receipt():
                                         </div>
                                     </div>
                                 </div>
-                                
+
                                 <!-- Beleg-Formular -->
                                 <div class="row">
                                     <div class="col-md-6">
                                         <h5 class="text-primary mb-3">Anbieter-Informationen</h5>
-                                        
+
                                         <!-- 🏥 ANBIETER-AUSWAHL mit IBAN-Integration -->
                                         <div class="mb-3">
                                             <label class="form-label">Anbieter auswählen *</label>
                                             <div class="input-group">
-                                                <select class="form-select" id="provider_select" onchange="loadProviderData()">
+                                                <select class="form-select" id="provider_select"
+                                                        onchange="loadProviderData()">
                                                     <option value="">Anbieter wählen...</option>
                                                     {% for provider in providers %}
-                                                    <option value="{{ provider.id }}" 
+                                                    <option value="{{ provider.id }}"
                                                             data-name="{{ provider.name }}"
                                                             data-type="{{ provider.provider_type }}"
                                                             data-iban="{{ provider.iban or '' }}"
                                                             data-bic="{{ provider.bic or '' }}"
                                                             data-phone="{{ provider.phone or '' }}"
                                                             data-email="{{ provider.email or '' }}">
-                                                        {{ provider.name }} ({{ {'doctor': 'Arzt', 'pharmacy': 'Apotheke', 'hospital': 'Krankenhaus', 'specialist': 'Spezialist'}.get(provider.provider_type, provider.provider_type) }})
+                                                        {{ provider.name }} ({{ {'doctor': 'Arzt', 'pharmacy': 'Apotheke', 
+                                                            'hospital': 'Krankenhaus', 'specialist': 'Spezialist'}.get(provider.provider_type, provider.provider_type) }})
                                                     </option>
                                                     {% endfor %}
                                                     <option value="new">➕ Neuer Anbieter...</option>
                                                 </select>
-                                                <a href="/provider/new" target="_blank" class="btn btn-outline-success" title="Neuen Anbieter erstellen">
+                                                <a href="/provider/new" target="_blank" 
+                                                   class="btn btn-outline-success" title="Neuen Anbieter erstellen">
                                                     <i class="bi bi-plus-circle"></i>
                                                 </a>
                                             </div>
                                         </div>
-                                        
+
                                         <!-- Anbieter-Details (werden automatisch gefüllt) -->
                                         <div class="mb-3">
                                             <label class="form-label">Anbieter-Name *</label>
-                                            <input type="text" class="form-control" name="provider_name" id="provider_name" required placeholder="Wird automatisch gefüllt...">
+                                            <input type="text" class="form-control" name="provider_name"
+                                                   id="provider_name" required
+                                                   placeholder="Wird automatisch gefüllt...">
                                         </div>
                                         <div class="mb-3">
                                             <label class="form-label">Anbieter-Typ *</label>
-                                            <select class="form-select" name="provider_type" id="provider_type" required>
+                                            <select class="form-select" name="provider_type" 
+                                                    id="provider_type" required>
                                                 <option value="">Typ wählen...</option>
                                                 <option value="doctor">Arzt</option>
                                                 <option value="pharmacy">Apotheke</option>
@@ -1067,27 +1058,33 @@ def new_receipt():
                                                 <option value="specialist">Spezialist</option>
                                             </select>
                                         </div>
-                                        
+
                                         <!-- 💳 BANKING-DATEN (aus Anbieter) -->
                                         <div class="row">
                                             <div class="col-md-6">
                                                 <div class="mb-3">
-                                                    <label class="form-label">IBAN <i class="bi bi-info-circle text-info" title="Wird automatisch aus Anbieter-Daten geladen"></i></label>
-                                                    <input type="text" class="form-control" id="provider_iban" readonly placeholder="Aus Anbieter-Daten">
+                                                    <label class="form-label">IBAN
+                                                        <i class="bi bi-info-circle text-info" 
+                                                           title="Wird automatisch aus Anbieter-Daten geladen"></i>
+                                                    </label>
+                                                    <input type="text" class="form-control" id="provider_iban"
+                                                           readonly placeholder="Aus Anbieter-Daten">
                                                 </div>
                                             </div>
                                             <div class="col-md-6">
                                                 <div class="mb-3">
                                                     <label class="form-label">BIC</label>
-                                                    <input type="text" class="form-control" id="provider_bic" readonly placeholder="Aus Anbieter-Daten">
+                                                    <input type="text" class="form-control" id="provider_bic"
+                                                           readonly placeholder="Aus Anbieter-Daten">
                                                 </div>
                                             </div>
                                         </div>
-                                        
+
                                         <div class="mb-3">
                                             <label class="form-label">Rechnungsbetrag *</label>
                                             <div class="input-group">
-                                                <input type="number" class="form-control" name="amount" id="amount" step="0.01" min="0" required>
+                                                <input type="number" class="form-control" name="amount"
+                                                       id="amount" step="0.01" min="0" required>
                                                 <span class="input-group-text">€</span>
                                             </div>
                                         </div>
@@ -1096,39 +1093,45 @@ def new_receipt():
                                         <h5 class="text-success mb-3">Behandlungs-Details</h5>
                                         <div class="mb-3">
                                             <label class="form-label">Rechnungsdatum *</label>
-                                            <input type="date" class="form-control" name="receipt_date" id="receipt_date" required>
+                                            <input type="date" class="form-control" name="receipt_date" 
+                                                   id="receipt_date" required>
                                         </div>
                                         <div class="mb-3">
                                             <label class="form-label">Behandlungsdatum</label>
-                                            <input type="date" class="form-control" name="treatment_date" id="treatment_date">
+                                            <input type="date" class="form-control" 
+                                                   name="treatment_date" id="treatment_date">
                                         </div>
                                         <div class="mb-3">
                                             <label class="form-label">Patient</label>
-                                            <input type="text" class="form-control" name="patient_name" value="{{ patient_name }}" required>
+                                            <input type="text" class="form-control" 
+                                                   name="patient_name" value="{{ patient_name }}" required>
                                         </div>
                                     </div>
                                 </div>
-                                
+
                                 <div class="row">
                                     <div class="col-md-6">
                                         <div class="mb-3">
                                             <label class="form-label">Diagnose-Code (ICD-10)</label>
-                                            <input type="text" class="form-control" name="diagnosis_code" placeholder="z.B. M25.5">
+                                            <input type="text" class="form-control" 
+                                                   name="diagnosis_code" placeholder="z.B. M25.5">
                                         </div>
                                     </div>
                                                                     <div class="col-md-6">
                                     <div class="mb-3">
                                         <label class="form-label">Rechnungsnummer</label>
-                                        <input type="text" class="form-control" name="prescription_number" placeholder="Rechnungs- oder Belegnummer">
+                                        <input type="text" class="form-control" 
+                                               name="prescription_number" placeholder="Rechnungs- oder Belegnummer">
                                     </div>
                                 </div>
                                 </div>
-                                
+
                                 <div class="mb-4">
                                     <label class="form-label">Notizen</label>
-                                    <textarea class="form-control" name="notes" rows="3" placeholder="Zusätzliche Informationen..."></textarea>
+                                    <textarea class="form-control" name="notes" rows="3" 
+                                              placeholder="Zusätzliche Informationen..."></textarea>
                                 </div>
-                                
+
                                 <!-- Submit Buttons -->
                                 <div class="d-grid gap-2 d-md-flex justify-content-md-end">
                                     <a href="/" class="btn btn-secondary btn-lg me-md-2">
@@ -1144,21 +1147,21 @@ def new_receipt():
                 </div>
             </div>
         </div>
-        
+
         <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
         <script>
             // Drag & Drop Funktionalität
             const uploadZone = document.querySelector('.upload-zone');
-            
+
             uploadZone.addEventListener('dragover', (e) => {
                 e.preventDefault();
                 uploadZone.classList.add('dragover');
             });
-            
+
             uploadZone.addEventListener('dragleave', () => {
                 uploadZone.classList.remove('dragover');
             });
-            
+
             uploadZone.addEventListener('drop', (e) => {
                 e.preventDefault();
                 uploadZone.classList.remove('dragover');
@@ -1167,26 +1170,26 @@ def new_receipt():
                     document.getElementById('fileInput').files = files;
                     handleFileUpload({target: {files: files}});
                 }
-            });
-            
+        });
+
             function handleFileUpload(event) {
                 const file = event.target.files[0];
                 if (!file) return;
-                
+
                 // OCR-Status anzeigen
                 document.getElementById('ocrStatus').style.display = 'block';
                 const progressBar = document.querySelector('.progress-bar');
-                
+
                 // 🤖 ECHTE OCR-VERARBEITUNG via API
                 const formData = new FormData();
                 formData.append('file', file);
-                
+
                 let progress = 0;
                 const progressInterval = setInterval(() => {
                     progress += 20;
                     progressBar.style.width = Math.min(progress, 90) + '%';
                 }, 500);
-                
+
                 fetch('/api/ocr_preview', {
                     method: 'POST',
                     body: formData
@@ -1195,16 +1198,16 @@ def new_receipt():
                 .then(data => {
                     clearInterval(progressInterval);
                     progressBar.style.width = '100%';
-                    
+
                     setTimeout(() => {
                         document.getElementById('ocrStatus').style.display = 'none';
-                        
+
                         if (data.success) {
                             fillOcrData(data);
                         } else {
                             showOcrError(data.message || 'OCR-Verarbeitung fehlgeschlagen');
                         }
-                    }, 500);
+                }, 500);
                 })
                 .catch(error => {
                     clearInterval(progressInterval);
@@ -1213,54 +1216,54 @@ def new_receipt():
                     console.error('OCR-Fehler:', error);
                 });
             }
-            
+
             // 💊 REZEPT-UPLOAD HANDLER
             function handlePrescriptionUpload(event) {
                 const file = event.target.files[0];
                 const statusElement = document.getElementById('prescriptionStatus');
-                
+
                 if (!file) {
                     statusElement.textContent = 'Kein Rezept ausgewählt';
                     statusElement.className = 'text-muted';
                     return;
                 }
-                
+
                 // Visual Feedback
                 statusElement.innerHTML = `<i class="bi bi-check-circle text-success"></i> ${file.name}`;
                 statusElement.className = 'text-success small';
-                
+
                 // Parent-Card highlighten
                 const card = statusElement.closest('.card');
                 card.style.borderColor = '#28a745';
                 card.style.boxShadow = '0 0 0 0.2rem rgba(40, 167, 69, 0.25)';
-                
+
                 console.log('✅ Rezept hochgeladen:', file.name);
             }
-            
+
             function fillOcrData(ocrData) {
                 // 🎯 ECHTE OCR-DATEN EINFÜGEN
                 if (ocrData.provider_name) {
                     document.getElementById('provider_name').value = ocrData.provider_name;
                 }
-                if (ocrData.provider_type) {
+            if (ocrData.provider_type) {
                     document.querySelector('select[name="provider_type"]').value = ocrData.provider_type;
                 }
-                if (ocrData.amount && ocrData.amount !== '0.00') {
+            if (ocrData.amount && ocrData.amount !== '0.00') {
                     document.getElementById('amount').value = ocrData.amount;
                 }
-                if (ocrData.date) {
+            if (ocrData.date) {
                     document.getElementById('receipt_date').value = ocrData.date;
                     // Automatisch Behandlungsdatum setzen falls leer
                     if (!document.getElementById('treatment_date').value) {
                         document.getElementById('treatment_date').value = ocrData.date;
                     }
                 }
-                
+
                 // 📁 PDF-VORSCHAU ANZEIGEN (NEUE FUNKTION)
                 if (ocrData.temp_file_id && ocrData.has_pdf) {
                     showPdfPreview(ocrData);
                 }
-                
+
                 // Visuelles Feedback für erkannte Felder
                 const fields = ['provider_name', 'amount', 'receipt_date'];
                 fields.forEach(fieldId => {
@@ -1273,8 +1276,8 @@ def new_receipt():
                             element.style.border = '';
                         }, 3000);
                     }
-                });
-                
+            });
+
                 // Provider-Type visuell highlighten
                 const typeSelect = document.querySelector('select[name="provider_type"]');
                 if (typeSelect && typeSelect.value) {
@@ -1285,19 +1288,20 @@ def new_receipt():
                         typeSelect.style.border = '';
                     }, 3000);
                 }
-                
+
                 // 🎉 Erfolgs-Meldung mit echten Daten
                 const alert = document.createElement('div');
                 alert.className = 'alert alert-success alert-dismissible fade show';
                 alert.innerHTML = `
                     <i class="bi bi-robot me-2"></i>
                     <strong>🤖 KI-OCR erfolgreich!</strong> ${ocrData.message || 'Daten automatisch erkannt'}
-                    <br><small><strong>Engine:</strong> ${ocrData.backend_used || 'unbekannt'} | <strong>Confidence:</strong> ${ocrData.confidence || 0}</small>
+                    <br><small><strong>Engine:</strong> ${ocrData.backend_used || 'unbekannt'} |
+                    <strong>Confidence:</strong> ${ocrData.confidence || 0}</small>
                     <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
                 `;
                 document.querySelector('.card-body').insertBefore(alert, document.getElementById('receiptForm'));
             }
-            
+
             function showOcrError(message) {
                 const alert = document.createElement('div');
                 alert.className = 'alert alert-warning alert-dismissible fade show';
@@ -1309,17 +1313,17 @@ def new_receipt():
                 `;
                 document.querySelector('.card-body').insertBefore(alert, document.getElementById('receiptForm'));
             }
-            
+
             // 📁 PDF-VORSCHAU FUNKTIONEN (NEUE FEATURES)
             let currentTempFileId = null;
-            
+
             function showPdfPreview(ocrData) {
                 currentTempFileId = ocrData.temp_file_id;
-                
+
                 // PDF-Viewer setzen
                 const pdfViewer = document.getElementById('pdfViewer');
                 pdfViewer.src = `/temp_file/${ocrData.temp_file_id}`;
-                
+
                 // OCR-Ergebnisse anzeigen
                 const ocrResults = document.getElementById('ocrResults');
                 ocrResults.innerHTML = `
@@ -1341,27 +1345,28 @@ def new_receipt():
                     </div>
                     <div class="mb-2">
                         <small class="text-muted">Confidence:</small><br>
-                        <span class="badge bg-${getConfidenceBadge(ocrData.confidence)}">${ocrData.confidence || 0}%</span>
+                        <span class="badge bg-${getConfidenceBadge(ocrData.confidence)}">
+                            ${ocrData.confidence || 0}%</span>
                     </div>
                     <div class="mb-2">
                         <small class="text-muted">OCR-Engine:</small><br>
                         <code>${ocrData.backend_used || 'unbekannt'}</code>
                     </div>
                 `;
-                
+
                 // PDF-Vorschau anzeigen
                 document.getElementById('pdfPreview').style.display = 'block';
-                
+
                 // Scroll zur Vorschau
-                document.getElementById('pdfPreview').scrollIntoView({ 
-                    behavior: 'smooth', 
-                    block: 'start' 
+                document.getElementById('pdfPreview').scrollIntoView({
+                    behavior: 'smooth',
+                    block: 'start'
                 });
             }
-            
+
             function hidePdfPreview() {
                 document.getElementById('pdfPreview').style.display = 'none';
-                
+
                 // Temporäre Datei aufräumen
                 if (currentTempFileId) {
                     fetch(`/api/cleanup_temp/${currentTempFileId}`, {
@@ -1370,14 +1375,14 @@ def new_receipt():
                         console.warn('Konnte temporäre Datei nicht löschen:', error);
                     });
                 }
-                
+
                 currentTempFileId = null;
             }
-            
+
             function acceptOcrData() {
                 // PDF-Vorschau ausblenden
                 hidePdfPreview();
-                
+
                 // Bestätigungs-Animation
                 const alert = document.createElement('div');
                 alert.className = 'alert alert-info alert-dismissible fade show';
@@ -1387,18 +1392,18 @@ def new_receipt():
                     <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
                 `;
                 document.querySelector('.card-body').insertBefore(alert, document.getElementById('receiptForm'));
-                
+
                 // Auto-Focus auf ersten leeren Feld
                 const firstEmptyField = ['provider_name', 'amount', 'receipt_date'].find(fieldId => {
                     const element = document.getElementById(fieldId);
                     return element && !element.value;
                 });
-                
+
                 if (firstEmptyField) {
                     document.getElementById(firstEmptyField).focus();
                 }
             }
-            
+
             function getProviderTypeLabel(type) {
                 const types = {
                     'doctor': 'Arzt',
@@ -1408,43 +1413,43 @@ def new_receipt():
                 };
                 return types[type] || 'Nicht erkannt';
             }
-            
+
             function getConfidenceBadge(confidence) {
                 if (confidence >= 80) return 'success';
                 if (confidence >= 60) return 'warning';
                 return 'danger';
             }
-            
+
             // Automatisches Behandlungsdatum setzen
             document.getElementById('receipt_date').addEventListener('change', function() {
                 if (!document.getElementById('treatment_date').value) {
                     document.getElementById('treatment_date').value = this.value;
                 }
-            });
-            
+        });
+
             // Aufräumen beim Verlassen der Seite
             window.addEventListener('beforeunload', function() {
                 if (currentTempFileId) {
-                    navigator.sendBeacon(`/api/cleanup_temp/${currentTempFileId}`, 
+                    navigator.sendBeacon(`/api/cleanup_temp/${currentTempFileId}`,
                         JSON.stringify({method: 'DELETE'}));
                 }
-            });
-            
+        });
+
             // 🏥 ANBIETER-INTEGRATION - Lädt Anbieter-Daten automatisch
             function loadProviderData() {
                 const select = document.getElementById('provider_select');
                 const selectedOption = select.options[select.selectedIndex];
-                
+
                 console.log('🔍 loadProviderData aufgerufen, selected value:', selectedOption.value);
                 console.log('🔍 Selected option:', selectedOption);
-                
+
                 if (selectedOption.value === 'new') {
                     // Öffne neuen Anbieter in neuem Tab
                     window.open('/provider/new', '_blank');
                     select.value = ''; // Reset selection
                     return;
                 }
-                
+
                 if (selectedOption.value && selectedOption.value !== '') {
                     // Lade Anbieter-Daten aus data-Attributen
                     const providerData = {
@@ -1455,27 +1460,28 @@ def new_receipt():
                         phone: selectedOption.getAttribute('data-phone'),
                         email: selectedOption.getAttribute('data-email')
                     };
-                    
+
                     console.log('📋 Extrahierte Anbieter-Daten:', providerData);
-                    
+
                     // Felder automatisch füllen
                     const nameField = document.getElementById('provider_name');
                     const typeField = document.getElementById('provider_type');
                     const ibanField = document.getElementById('provider_iban');
                     const bicField = document.getElementById('provider_bic');
-                    
+
                     if (nameField) nameField.value = providerData.name || '';
                     if (typeField) typeField.value = providerData.type || '';
                     if (ibanField) ibanField.value = providerData.iban || '';
                     if (bicField) bicField.value = providerData.bic || '';
-                    
-                    console.log('✅ Felder gefüllt - Name:', nameField?.value, 'Type:', typeField?.value, 'IBAN:', ibanField?.value);
-                    
+
+                    console.log('✅ Felder gefüllt - Name:', nameField?.value, 
+                                'Type:', typeField?.value, 'IBAN:', ibanField?.value);
+
                     // Visuelles Feedback
                     if (providerData.iban && ibanField) {
                         ibanField.classList.add('border-success', 'bg-light');
                         if (bicField) bicField.classList.add('border-success', 'bg-light');
-                        
+
                         // Erfolgs-Meldung
                         setTimeout(() => {
                             const message = '✅ Anbieter-Daten automatisch geladen!\\n\\n' +
@@ -1484,7 +1490,7 @@ def new_receipt():
                                           'BIC: ' + (providerData.bic || 'Nicht hinterlegt') + '\\n\\n' +
                                           'Die Daten sind bereit für GiroCode-Zahlungen!';
                             alert(message);
-                            
+
                             // Markiere als für GiroCode vorbereitet
                             window.providerSelected = true;
                             window.selectedProviderData = providerData;
@@ -1499,9 +1505,9 @@ def new_receipt():
                             if (confirm(message)) {
                                 window.open('/provider/' + selectedOption.value + '/edit', '_blank');
                             }
-                        }, 300);
+                    }, 300);
                     }
-                    
+
                     console.log('✅ Anbieter-Daten erfolgreich verarbeitet');
                 } else {
                     // Felder leeren
@@ -1509,21 +1515,21 @@ def new_receipt():
                     const typeField = document.getElementById('provider_type');
                     const ibanField = document.getElementById('provider_iban');
                     const bicField = document.getElementById('provider_bic');
-                    
+
                     if (nameField) nameField.value = '';
                     if (typeField) typeField.value = '';
                     if (ibanField) ibanField.value = '';
                     if (bicField) bicField.value = '';
-                    
+
                     // Styling zurücksetzen
                     if (ibanField) ibanField.classList.remove('border-success', 'bg-light');
                     if (bicField) bicField.classList.remove('border-success', 'bg-light');
-                    
+
                     window.providerSelected = false;
                     console.log('🗑️ Anbieter-Felder geleert');
                 }
             }
-            
+
             // Debug-Funktion für Anbieter-Dropdown
             document.addEventListener('DOMContentLoaded', function() {
                 const select = document.getElementById('provider_select');
@@ -1538,42 +1544,44 @@ def new_receipt():
                             dataIban: option.getAttribute('data-iban')
                         });
                     }
-                } else {
+            } else {
                     console.error('❌ provider_select Element nicht gefunden!');
                 }
-            });
-            
+        });
+
             // OCR-Integration mit Anbieter-Abgleich erweitern
             function fillOcrDataWithProviderMatch(ocrData) {
                 fillOcrData(ocrData); // Originale Funktion aufrufen
-                
+
                 // Versuche Anbieter in der Datenbank zu finden
                 if (ocrData.provider_name) {
                     const providerSelect = document.getElementById('provider_select');
                     const options = providerSelect.options;
-                    
+
                     for (let i = 0; i < options.length; i++) {
                         const option = options[i];
                         const providerName = option.getAttribute('data-name');
-                        
+
                         if (providerName && providerName.toLowerCase().includes(ocrData.provider_name.toLowerCase())) {
                             providerSelect.value = option.value;
                             loadProviderData();
-                            
+
                             setTimeout(() => {
-                                alert('🎯 Anbieter automatisch erkannt!\\n\\n"' + providerName + '" wurde aus der Datenbank ausgewählt.');
+                                alert('🎯 Anbieter automatisch erkannt!\\n\\n"' + providerName + 
+                                      '" wurde aus der Datenbank ausgewählt.');
                             }, 1000);
                             break;
                         }
                     }
                 }
             }
-        </script>
+    </script>
     </body>
     </html>
     """, patient_name=patient_name, providers=providers)
 
 # 📄 BELEG ERSTELLEN - VOLLSTÄNDIG FUNKTIONAL
+
 @app.route('/receipt/create', methods=['POST'])
 def create_receipt():
     """📄 Neuen medizinischen Beleg erstellen - MIT REZEPT-SUPPORT"""
@@ -1582,22 +1590,22 @@ def create_receipt():
         receipt_file = request.files.get('receipt_file')
         file_path = None
         ocr_data = None
-        
+
         if receipt_file and receipt_file.filename:
             filename = secure_filename(receipt_file.filename)
             timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
             safe_filename = f"{timestamp}_{filename}"
             file_path = os.path.join(app.config['UPLOAD_FOLDER'], safe_filename)
             receipt_file.save(file_path)
-            
+
             # OCR-Verarbeitung
             ocr_data = json.dumps(extract_ocr_data(file_path))
             logger.info(f"Beleg-Datei hochgeladen und OCR verarbeitet: {safe_filename}")
-        
+
         # 💊 REZEPT-DATEI VERARBEITEN (OPTIONAL)
         prescription_file = request.files.get('prescription_file')
         prescription_file_path = None
-        
+
         if prescription_file and prescription_file.filename:
             prescription_filename = secure_filename(prescription_file.filename)
             timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
@@ -1605,13 +1613,12 @@ def create_receipt():
             prescription_file_path = os.path.join(app.config['UPLOAD_FOLDER'], safe_prescription_filename)
             prescription_file.save(prescription_file_path)
             logger.info(f"Rezept-Datei hochgeladen: {safe_prescription_filename}")
-        
+
         # Beleg-Daten aus Formular
         receipt_id = generate_receipt_id()
-        
+
         conn = get_db_connection()
         cursor = conn.cursor()
-        
         cursor.execute('''
             INSERT INTO medical_receipts (
                 receipt_id, provider_name, provider_type, amount, receipt_date,
@@ -1635,50 +1642,50 @@ def create_receipt():
             ocr_data,
             request.form.get('notes') or None
         ))
-        
+
         conn.commit()
         conn.close()
-        
+
         logger.info(f"Neuer Beleg erstellt: {receipt_id}")
         flash(f'Beleg {receipt_id} erfolgreich erstellt!', 'success')
         return redirect(url_for('receipt_detail', receipt_id=receipt_id))
-        
+
     except Exception as e:
         logger.error(f"Fehler beim Erstellen des Belegs: {e}")
         flash('Fehler beim Erstellen des Belegs!', 'error')
         return redirect(url_for('new_receipt'))
 
 # 📋 ALLE BELEGE - VOLLSTÄNDIGE ÜBERSICHT
+
 @app.route('/receipts')
 def receipts_list():
     """📋 Alle medizinischen Belege mit Status-Übersicht"""
     conn = get_db_connection()
     cursor = conn.cursor()
-    
     # Filter aus URL-Parameter
     status_filter = request.args.get('status', 'all')
     provider_filter = request.args.get('provider', 'all')
     search_query = request.args.get('search', '').strip()
     sort_by = request.args.get('sort', 'created_at')
     sort_order = request.args.get('order', 'desc')
-    
+
     # Basis-Query
     query = 'SELECT * FROM medical_receipts WHERE 1=1'
     params = []
-    
+
     if status_filter != 'all':
         query += ' AND payment_status = ?'
         params.append(status_filter)
-    
+
     if provider_filter != 'all':
         query += ' AND provider_type = ?'
         params.append(provider_filter)
-    
+
     # Suchfunktion
     if search_query:
         search_conditions = [
             'provider_name LIKE ?',
-            'prescription_number LIKE ?', 
+            'prescription_number LIKE ?',
             'patient_name LIKE ?',
             'notes LIKE ?',
             'receipt_id LIKE ?',
@@ -1687,37 +1694,37 @@ def receipts_list():
         query += f' AND ({" OR ".join(search_conditions)})'
         search_term = f'%{search_query}%'
         params.extend([search_term] * len(search_conditions))
-    
+
     # Sortierung hinzufügen
     valid_sort_fields = {
         'created_at': 'created_at',
-        'receipt_date': 'receipt_date', 
+        'receipt_date': 'receipt_date',
         'prescription_number': 'prescription_number',
         'provider_name': 'provider_name',
         'amount': 'amount'
     }
-    
+
     sort_field = valid_sort_fields.get(sort_by, 'created_at')
     sort_direction = 'ASC' if sort_order.lower() == 'asc' else 'DESC'
-    
+
     # Spezialbehandlung für NULL-Werte bei prescription_number
     if sort_field == 'prescription_number':
         query += f' ORDER BY {sort_field} IS NULL, {sort_field} {sort_direction}'
     else:
         query += f' ORDER BY {sort_field} {sort_direction}'
-    
+
     cursor.execute(query, params)
     receipts = cursor.fetchall()
-    
+
     # Statistiken
     cursor.execute('SELECT payment_status, COUNT(*) as count FROM medical_receipts GROUP BY payment_status')
     status_stats = {row['payment_status']: row['count'] for row in cursor.fetchall()}
-    
+
     cursor.execute('SELECT provider_type, COUNT(*) as count FROM medical_receipts GROUP BY provider_type')
     provider_stats = {row['provider_type']: row['count'] for row in cursor.fetchall()}
-    
+
     conn.close()
-    
+
     return render_template_string("""
     <!DOCTYPE html>
     <html lang="de">
@@ -1785,7 +1792,7 @@ def receipts_list():
                             </div>
                         </div>
                     </div>
-                    
+
                     <!-- Suche, Filter & Sortierung -->
                     <div class="row mb-4">
                         <div class="col-md-8">
@@ -1800,11 +1807,11 @@ def receipts_list():
                                                 <span class="input-group-text">
                                                     <i class="bi bi-search"></i>
                                                 </span>
-                                                <input type="text" class="form-control" name="search" 
-                                                       value="{{ request.args.get('search', '') }}" 
+                                                <input type="text" class="form-control" name="search"
+                                                       value="{{ request.args.get('search', '') }}"
                                                        placeholder="Anbieter, Rechnungsnummer, Patient, Betrag...">
                                                 {% if request.args.get('search') %}
-                                                <a href="?{% for key, value in request.args.items() %}{% if key != 'search' %}{{ key }}={{ value }}&{% endif %}{% endfor %}" 
+                                                <a href="?{% for key, value in request.args.items() %}{% if key != 'search' %}{{ key }}={{ value }}&{% endif %}{% endfor %}"
                                                    class="btn btn-outline-secondary" title="Suche löschen">
                                                     <i class="bi bi-x"></i>
                                                 </a>
@@ -1812,7 +1819,7 @@ def receipts_list():
                                             </div>
                                             <small class="text-muted">Durchsucht: Anbieter, Rechnungsnummer, Patient, Notizen, Beleg-ID, Betrag</small>
                                         </div>
-                                        
+
                                         <!-- Filter -->
                                         <div class="col-md-6">
                                             <label class="form-label">Status</label>
@@ -1834,7 +1841,7 @@ def receipts_list():
                                                 <option value="specialist" {{ 'selected' if request.args.get('provider') == 'specialist' }}>Spezialisten</option>
                                             </select>
                                         </div>
-                                        
+
                                         <!-- Sortierung -->
                                         <div class="col-md-8">
                                             <label class="form-label">Sortieren nach</label>
@@ -1853,7 +1860,7 @@ def receipts_list():
                                                 <option value="asc" {{ 'selected' if request.args.get('order') == 'asc' }}>Aufsteigend</option>
                                             </select>
                                         </div>
-                                        
+
                                         <!-- Buttons -->
                                         <div class="col-12">
                                             <button type="submit" class="btn btn-primary btn-sm me-2">
@@ -1888,14 +1895,14 @@ def receipts_list():
                             </div>
                         </div>
                     </div>
-                    
+
                     <!-- Belege-Tabelle -->
                     <div class="table-responsive">
                         <table class="table table-hover">
                             <thead class="table-dark">
                                 <tr>
                                     <th>
-                                        <a href="?sort=prescription_number&order={{ 'asc' if request.args.get('sort') == 'prescription_number' and request.args.get('order') == 'desc' else 'desc' }}{% if request.args.get('status') %}&status={{ request.args.get('status') }}{% endif %}{% if request.args.get('provider') %}&provider={{ request.args.get('provider') }}{% endif %}" 
+                                        <a href="?sort=prescription_number&order={{ 'asc' if request.args.get('sort') == 'prescription_number' and request.args.get('order') == 'desc' else 'desc' }}{% if request.args.get('status') %}&status={{ request.args.get('status') }}{% endif %}{% if request.args.get('provider') %}&provider={{ request.args.get('provider') }}{% endif %}"
                                            class="text-white text-decoration-none">
                                             Rechnungsnummer
                                             {% if request.args.get('sort') == 'prescription_number' %}
@@ -1904,7 +1911,7 @@ def receipts_list():
                                         </a>
                                     </th>
                                     <th>
-                                        <a href="?sort=provider_name&order={{ 'asc' if request.args.get('sort') == 'provider_name' and request.args.get('order') == 'desc' else 'desc' }}{% if request.args.get('status') %}&status={{ request.args.get('status') }}{% endif %}{% if request.args.get('provider') %}&provider={{ request.args.get('provider') }}{% endif %}" 
+                                        <a href="?sort=provider_name&order={{ 'asc' if request.args.get('sort') == 'provider_name' and request.args.get('order') == 'desc' else 'desc' }}{% if request.args.get('status') %}&status={{ request.args.get('status') }}{% endif %}{% if request.args.get('provider') %}&provider={{ request.args.get('provider') }}{% endif %}"
                                            class="text-white text-decoration-none">
                                             Anbieter
                                             {% if request.args.get('sort') == 'provider_name' %}
@@ -1914,7 +1921,7 @@ def receipts_list():
                                     </th>
                                     <th>Typ</th>
                                     <th>
-                                        <a href="?sort=amount&order={{ 'asc' if request.args.get('sort') == 'amount' and request.args.get('order') == 'desc' else 'desc' }}{% if request.args.get('status') %}&status={{ request.args.get('status') }}{% endif %}{% if request.args.get('provider') %}&provider={{ request.args.get('provider') }}{% endif %}" 
+                                        <a href="?sort=amount&order={{ 'asc' if request.args.get('sort') == 'amount' and request.args.get('order') == 'desc' else 'desc' }}{% if request.args.get('status') %}&status={{ request.args.get('status') }}{% endif %}{% if request.args.get('provider') %}&provider={{ request.args.get('provider') }}{% endif %}"
                                            class="text-white text-decoration-none">
                                             Betrag
                                             {% if request.args.get('sort') == 'amount' %}
@@ -1923,7 +1930,7 @@ def receipts_list():
                                         </a>
                                     </th>
                                     <th>
-                                        <a href="?sort=receipt_date&order={{ 'asc' if request.args.get('sort') == 'receipt_date' and request.args.get('order') == 'desc' else 'desc' }}{% if request.args.get('status') %}&status={{ request.args.get('status') }}{% endif %}{% if request.args.get('provider') %}&provider={{ request.args.get('provider') }}{% endif %}" 
+                                        <a href="?sort=receipt_date&order={{ 'asc' if request.args.get('sort') == 'receipt_date' and request.args.get('order') == 'desc' else 'desc' }}{% if request.args.get('status') %}&status={{ request.args.get('status') }}{% endif %}{% if request.args.get('provider') %}&provider={{ request.args.get('provider') }}{% endif %}"
                                            class="text-white text-decoration-none">
                                             Datum
                                             {% if request.args.get('sort') == 'receipt_date' %}
@@ -2001,7 +2008,7 @@ def receipts_list():
                     </tbody>
                 </table>
             </div>
-            
+
             <!-- Navigation -->
             <div class="text-center mt-4">
                 <a href="/" class="btn btn-primary btn-lg">
@@ -2009,18 +2016,18 @@ def receipts_list():
                 </a>
             </div>
         </div>
-        
+
         <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
         <script>
             function exportReceipts() {
                 alert('Excel-Export wird vorbereitet... (Produktionsfeature)');
             }
-            
+
             // 🔍 Suche-Funktionalität
             document.addEventListener('DOMContentLoaded', function() {
                 const searchInput = document.querySelector('input[name="search"]');
                 const form = searchInput?.closest('form');
-                
+
                 if (searchInput && form) {
                     // Enter-Taste für Suche
                     searchInput.addEventListener('keypress', function(e) {
@@ -2028,8 +2035,8 @@ def receipts_list():
                             e.preventDefault();
                             form.submit();
                         }
-                    });
-                    
+                });
+
                     // Fokus auf Suchfeld bei Strg+F
                     document.addEventListener('keydown', function(e) {
                         if ((e.ctrlKey || e.metaKey) && e.key === 'f') {
@@ -2037,43 +2044,43 @@ def receipts_list():
                             searchInput.focus();
                             searchInput.select();
                         }
-                    });
-                    
+                });
+
                     // Suchfeld leeren mit Escape
                     searchInput.addEventListener('keydown', function(e) {
                         if (e.key === 'Escape' && searchInput.value) {
                             searchInput.value = '';
                             form.submit();
                         }
-                    });
+                });
                 }
-                
+
                 // Tooltip für Suchfeld
                 if (searchInput) {
                     searchInput.title = 'Drücken Sie Enter zum Suchen oder Strg+F zum Fokussieren';
                 }
-            });
-            
+        });
+
             function editReceipt(receiptId) {
                 window.location.href = '/receipt/' + receiptId + '/edit';
             }
-            
+
             function copyReceipt(receiptId) {
                 var confirmMessage = '📋 Beleg kopieren?\\n\\n' +
                                    'Möchten Sie den Beleg ' + receiptId + ' als Vorlage für einen neuen Beleg verwenden?\\n\\n' +
                                    'Anbieter-Daten werden übernommen, Datum und Betrag können Sie anpassen.';
-                
+
                 if (confirm(confirmMessage)) {
                     // Weiterleitung zum Kopieren-Formular
                     window.location.href = '/receipt/' + receiptId + '/copy';
                 }
             }
-            
+
             function deleteReceipt(receiptId) {
                 var confirmMessage = '🗑️ Beleg wirklich löschen?\\n\\n' +
                                    'Sind Sie sicher, dass Sie den Beleg ' + receiptId + ' dauerhaft löschen möchten?\\n\\n' +
                                    'Diese Aktion kann nicht rückgängig gemacht werden!';
-                
+
                 if (confirm(confirmMessage)) {
                     // Erstelle ein unsichtbares Formular für POST-Request
                     var form = document.createElement('form');
@@ -2084,36 +2091,36 @@ def receipts_list():
                     form.submit();
                 }
             }
-        </script>
+    </script>
     </body>
     </html>
     """, receipts=receipts, status_stats=status_stats, provider_stats=provider_stats, request=request)
 
 # 📄 EINZELBELEG DETAILANSICHT - VOLLSTÄNDIG
+
 @app.route('/receipt/<receipt_id>')
 def receipt_detail(receipt_id):
     """📄 Vollständige Detailansicht eines medizinischen Belegs"""
     conn = get_db_connection()
     cursor = conn.cursor()
-    
     # Beleg-Details
     cursor.execute('SELECT * FROM medical_receipts WHERE receipt_id = ?', (receipt_id,))
     receipt = cursor.fetchone()
-    
+
     if not receipt:
         flash('Beleg nicht gefunden!', 'error')
         return redirect(url_for('receipts_list'))
-    
+
     # Mahnungen für diesen Beleg
     cursor.execute('SELECT * FROM payment_reminders WHERE receipt_id = ? ORDER BY sent_date DESC', (receipt_id,))
     reminders = cursor.fetchall()
-    
+
     # Erstattungs-Uploads
     cursor.execute('SELECT * FROM reimbursement_uploads WHERE receipt_id = ? ORDER BY upload_date DESC', (receipt_id,))
     uploads = cursor.fetchall()
-    
+
     conn.close()
-    
+
     return render_template_string("""
     <!DOCTYPE html>
     <html lang="de">
@@ -2202,7 +2209,7 @@ def receipt_detail(receipt_id):
                                     </table>
                                 </div>
                             </div>
-                            
+
                             <!-- Schnell-Aktionen -->
                             <div class="row mt-4">
                                 <div class="col-12">
@@ -2255,7 +2262,7 @@ def receipt_detail(receipt_id):
                         </div>
                     </div>
                 </div>
-                
+
                 <div class="col-lg-4">
                     <!-- Status-Tracking -->
                     <div class="card shadow mb-4">
@@ -2274,7 +2281,7 @@ def receipt_detail(receipt_id):
                                     {{ {'unpaid': 'Zahlung ausstehend', 'paid': 'Vollständig bezahlt'}.get(receipt.payment_status, 'Unbekannt') }}
                                 </small>
                             </div>
-                            
+
                             <div class="mb-3">
                                 <h6>Debeka Status</h6>
                                 <div class="progress mb-2">
@@ -2288,7 +2295,7 @@ def receipt_detail(receipt_id):
                                     {% endif %}
                                 </small>
                             </div>
-                            
+
                             <div class="mb-3">
                                 <h6>Beihilfe Status</h6>
                                 <div class="progress mb-2">
@@ -2304,7 +2311,7 @@ def receipt_detail(receipt_id):
                             </div>
                         </div>
                     </div>
-                    
+
                     <!-- Mahnungen -->
                     {% if reminders %}
                     <div class="card shadow mb-4">
@@ -2327,7 +2334,7 @@ def receipt_detail(receipt_id):
                         </div>
                     </div>
                     {% endif %}
-                    
+
                     <!-- Uploads -->
                     {% if uploads %}
                     <div class="card shadow">
@@ -2352,7 +2359,7 @@ def receipt_detail(receipt_id):
                     {% endif %}
                 </div>
             </div>
-            
+
             <!-- Navigation -->
             <div class="text-center mt-4">
                 <a href="/receipts" class="btn btn-primary btn-lg me-2">
@@ -2363,7 +2370,7 @@ def receipt_detail(receipt_id):
                 </a>
             </div>
         </div>
-        
+
         <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
         <script>
             function submitToDebeka() {
@@ -2376,7 +2383,7 @@ def receipt_detail(receipt_id):
                         });
                 }
             }
-            
+
             function submitToBeihilfe() {
                 if (confirm('Beleg an Beihilfe zur Erstattung einreichen?')) {
                     fetch('/api/submit/beihilfe/{{ receipt.receipt_id }}', {method: 'POST'})
@@ -2387,7 +2394,7 @@ def receipt_detail(receipt_id):
                         });
                 }
             }
-            
+
             function deleteReceipt(receiptId) {
                 var confirmMessage = '🗑️ Beleg wirklich löschen?\\n\\n' +
                                    'Sind Sie sicher, dass Sie den Beleg ' + receiptId + ' dauerhaft löschen möchten?\\n\\n' +
@@ -2397,7 +2404,7 @@ def receipt_detail(receipt_id):
                                    '• Mahnungen\\n' +
                                    '• Erstattungsdaten\\n\\n' +
                                    'Diese Aktion kann nicht rückgängig gemacht werden!';
-                
+
                 if (confirm(confirmMessage)) {
                     // Erstelle ein unsichtbares Formular für POST-Request
                     var form = document.createElement('form');
@@ -2408,45 +2415,45 @@ def receipt_detail(receipt_id):
                     form.submit();
                 }
             }
-        </script>
+    </script>
     </body>
     </html>
     """, receipt=receipt, reminders=reminders, uploads=uploads)
 
 # 💳 GIROCODE GENERIERUNG - VOLLSTÄNDIG FUNKTIONAL
+
 @app.route('/girocode/<receipt_id>')
 def generate_girocode(receipt_id):
     """💳 GiroCode für Zahlungen generieren mit Anbieter-IBAN"""
     conn = get_db_connection()
     cursor = conn.cursor()
-    
     cursor.execute('SELECT * FROM medical_receipts WHERE receipt_id = ?', (receipt_id,))
     receipt = cursor.fetchone()
-    
+
     if not receipt:
         flash('Beleg nicht gefunden!', 'error')
         return redirect(url_for('receipts_list'))
-    
+
     # 🏥 ANBIETER-DATEN LADEN für IBAN/BIC
     cursor.execute('SELECT * FROM service_providers WHERE name = ?', (receipt['provider_name'],))
     provider = cursor.fetchone()
-    
+
     try:
         # IBAN und BIC bestimmen (Priorität: Anbieter-DB → Fallback)
         provider_iban = None
         provider_bic = None
-        
+
         if provider:
             provider_iban = provider['iban']
             provider_bic = provider['bic']
             logger.info(f"💳 Anbieter-Banking gefunden: {provider['name']} - IBAN: {provider_iban}")
-        
+
         # Fallback IBAN wenn nicht in Anbieter-DB
         if not provider_iban:
             provider_iban = "DE89370400440532013000"  # Beispiel-IBAN
             provider_bic = "COBADEFFXXX"  # Beispiel-BIC
             logger.warning(f"⚠️ Keine IBAN für Anbieter {receipt['provider_name']} - verwende Fallback")
-        
+
         # EPC-konformer GiroCode mit echter IBAN
         girocode_data = [
             "BCD",  # Service Tag
@@ -2461,18 +2468,17 @@ def generate_girocode(receipt_id):
             f"MED-{receipt['receipt_id']}",  # Reference
             f"Medizinische Rechnung {receipt['receipt_id']}"[:140]  # Remittance Info
         ]
-        
         girocode_string = '\n'.join(girocode_data)
         qr = segno.make(girocode_string, error='M')
         buffer = io.BytesIO()
         qr.save(buffer, kind='png', scale=8)
         qr_base64 = base64.b64encode(buffer.getvalue()).decode('utf-8')
-        
+
         # GiroCode als generiert markieren
         cursor.execute('UPDATE medical_receipts SET girocode_generated = 1 WHERE receipt_id = ?', (receipt_id,))
         conn.commit()
         conn.close()
-        
+
         return render_template_string("""
         <!DOCTYPE html>
         <html lang="de">
@@ -2500,12 +2506,12 @@ def generate_girocode(receipt_id):
                             </div>
                             <div class="card-body text-center p-5">
                                 <div class="mb-4">
-                                    <img src="data:image/png;base64,{{ qr_base64 }}" 
-                                         class="img-fluid qr-image" 
+                                    <img src="data:image/png;base64,{{ qr_base64 }}"
+                                         class="img-fluid qr-image"
                                          alt="GiroCode für {{ receipt.receipt_id }}"
                                          style="max-width: 350px;">
                                 </div>
-                                
+
                                 <div class="alert alert-success mb-4">
                                     <h5><i class="bi bi-phone me-2"></i>Banking-App Anleitung:</h5>
                                     <ol class="text-start">
@@ -2514,7 +2520,7 @@ def generate_girocode(receipt_id):
                                         <li>Daten prüfen und überweisen</li>
                                     </ol>
                                 </div>
-                                
+
                                 <div class="card bg-light">
                                     <div class="card-body">
                                         <h5 class="text-primary">Zahlungsdetails</h5>
@@ -2569,7 +2575,7 @@ def generate_girocode(receipt_id):
                     </div>
                 </div>
             </div>
-            
+
             <script>
                 function markAsPaid() {
                     if (confirm('Beleg als bezahlt markieren?')) {
@@ -2581,36 +2587,36 @@ def generate_girocode(receipt_id):
                             });
                     }
                 }
-            </script>
+        </script>
         </body>
         </html>
         """, receipt=receipt, qr_base64=qr_base64, provider=provider, provider_iban=provider_iban, provider_bic=provider_bic)
-        
+
     except Exception as e:
         logger.error(f"Fehler bei GiroCode-Generierung: {e}")
         flash('Fehler bei der QR-Code-Generierung!', 'error')
         return redirect(url_for('receipt_detail', receipt_id=receipt_id))
 
 # 🔌 API-ENDPUNKTE - VOLLSTÄNDIG FUNKTIONAL
+
 @app.route('/api/mark_paid/<receipt_id>', methods=['POST'])
 def api_mark_paid(receipt_id):
     """Als bezahlt markieren"""
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
-        
         cursor.execute('''
-            UPDATE medical_receipts 
-            SET payment_status = 'paid', payment_date = CURRENT_DATE, updated_at = CURRENT_TIMESTAMP 
+            UPDATE medical_receipts
+            SET payment_status = 'paid', payment_date = CURRENT_DATE, updated_at = CURRENT_TIMESTAMP
             WHERE receipt_id = ?
         ''', (receipt_id,))
-        
+
         conn.commit()
         conn.close()
-        
+
         logger.info(f"Beleg {receipt_id} als bezahlt markiert")
         return jsonify({'success': True, 'message': 'Als bezahlt markiert!'})
-        
+
     except Exception as e:
         logger.error(f"Fehler beim Markieren als bezahlt: {e}")
         return jsonify({'success': False, 'message': 'Fehler aufgetreten!'})
@@ -2621,61 +2627,60 @@ def api_submit_reimbursement(provider, receipt_id):
     try:
         if provider not in ['debeka', 'beihilfe']:
             return jsonify({'success': False, 'message': 'Ungültiger Anbieter!'})
-        
+
         conn = get_db_connection()
         cursor = conn.cursor()
-        
         # Status aktualisieren
         if provider == 'debeka':
             cursor.execute('''
-                UPDATE medical_receipts 
+                UPDATE medical_receipts
                 SET debeka_status = 'submitted', debeka_submission_date = CURRENT_DATE, updated_at = CURRENT_TIMESTAMP
                 WHERE receipt_id = ?
             ''', (receipt_id,))
         else:
             cursor.execute('''
-                UPDATE medical_receipts 
+                UPDATE medical_receipts
                 SET beihilfe_status = 'submitted', beihilfe_submission_date = CURRENT_DATE, updated_at = CURRENT_TIMESTAMP
                 WHERE receipt_id = ?
             ''', (receipt_id,))
-        
+
         conn.commit()
         conn.close()
-        
+
         logger.info(f"Beleg {receipt_id} an {provider} eingereicht")
         return jsonify({'success': True, 'message': f'An {provider.title()} eingereicht!'})
-        
+
     except Exception as e:
         logger.error(f"Fehler beim Einreichen: {e}")
         return jsonify({'success': False, 'message': 'Fehler beim Einreichen!'})
 
 # 💳 ZAHLUNGS-MANAGEMENT - VOLLSTÄNDIG
+
 @app.route('/payments')
 def payments_overview():
     """💳 Zahlungs-Übersicht"""
     conn = get_db_connection()
     cursor = conn.cursor()
-    
     # Offene Zahlungen
     cursor.execute('SELECT * FROM medical_receipts WHERE payment_status = "unpaid" ORDER BY receipt_date ASC')
     unpaid_receipts = cursor.fetchall()
-    
+
     # Kürzlich bezahlte
     cursor.execute('SELECT * FROM medical_receipts WHERE payment_status = "paid" ORDER BY payment_date DESC LIMIT 10')
     recent_paid = cursor.fetchall()
-    
+
     # Mahnungen
     cursor.execute('''
-        SELECT mr.*, pr.reminder_level, pr.due_date, pr.fee 
-        FROM medical_receipts mr 
-        JOIN payment_reminders pr ON mr.receipt_id = pr.receipt_id 
-        WHERE pr.status = "sent" 
+        SELECT mr.*, pr.reminder_level, pr.due_date, pr.fee
+        FROM medical_receipts mr
+        JOIN payment_reminders pr ON mr.receipt_id = pr.receipt_id
+        WHERE pr.status = "sent"
         ORDER BY pr.due_date ASC
     ''')
     reminder_receipts = cursor.fetchall()
-    
+
     conn.close()
-    
+
     return render_template_string("""
     <!DOCTYPE html>
     <html lang="de">
@@ -2727,7 +2732,7 @@ def payments_overview():
                             </div>
                         </div>
                     </div>
-                    
+
                     <!-- Tabs -->
                     <ul class="nav nav-tabs mb-4" role="tablist">
                         <li class="nav-item">
@@ -2746,7 +2751,7 @@ def payments_overview():
                             </button>
                         </li>
                     </ul>
-                    
+
                     <div class="tab-content">
                         <!-- Offene Zahlungen -->
                         <div class="tab-pane fade show active" id="unpaid">
@@ -2796,7 +2801,7 @@ def payments_overview():
                                 </table>
                             </div>
                         </div>
-                        
+
                         <!-- Mahnungen -->
                         <div class="tab-pane fade" id="reminders">
                             <div class="table-responsive">
@@ -2844,7 +2849,7 @@ def payments_overview():
                                 </table>
                             </div>
                         </div>
-                        
+
                         <!-- Bezahlte -->
                         <div class="tab-pane fade" id="paid">
                             <div class="table-responsive">
@@ -2883,7 +2888,7 @@ def payments_overview():
                             </div>
                         </div>
                     </div>
-                    
+
                     <!-- Navigation -->
                     <div class="text-center mt-4">
                         <a href="/" class="btn btn-primary btn-lg">
@@ -2893,7 +2898,7 @@ def payments_overview():
                 </div>
             </div>
         </div>
-        
+
         <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
         <script>
             function markAsPaid(receiptId) {
@@ -2905,47 +2910,47 @@ def payments_overview():
                                 alert('Als bezahlt markiert!');
                                 location.reload();
                             }
-                        });
+                    });
                 }
             }
-            
+
             function sendReminder(receiptId) {
                 if (confirm('Mahnung senden?')) {
                     alert('Mahnung wird versendet... (Produktionsfeature)');
                 }
             }
-            
+
             function nextReminder(receiptId) {
                 if (confirm('Nächste Mahnstufe senden?')) {
                     alert('Nächste Mahnstufe wird erstellt... (Produktionsfeature)');
                 }
             }
-        </script>
+    </script>
     </body>
     </html>
     """, unpaid_receipts=unpaid_receipts, recent_paid=recent_paid, reminder_receipts=reminder_receipts)
 
 # 📤 EINREICHUNGS-MANAGEMENT - VOLLSTÄNDIG
+
 @app.route('/submissions')
 def submissions_overview():
     """📤 Einreichungs-Übersicht"""
     conn = get_db_connection()
     cursor = conn.cursor()
-    
     # Debeka Einreichungen
     cursor.execute('SELECT * FROM medical_receipts WHERE debeka_status != "none" ORDER BY debeka_submission_date DESC')
     debeka_submissions = cursor.fetchall()
-    
+
     # Beihilfe Einreichungen
     cursor.execute('SELECT * FROM medical_receipts WHERE beihilfe_status != "none" ORDER BY beihilfe_submission_date DESC')
     beihilfe_submissions = cursor.fetchall()
-    
+
     # Nicht eingereichte Belege
     cursor.execute('SELECT * FROM medical_receipts WHERE payment_status = "paid" AND debeka_status = "none" AND beihilfe_status = "none"')
     pending_submissions = cursor.fetchall()
-    
+
     conn.close()
-    
+
     return render_template_string("""
     <!DOCTYPE html>
     <html lang="de">
@@ -2994,7 +2999,7 @@ def submissions_overview():
                             </div>
                         </div>
                     </div>
-                    
+
                     <!-- Tabs -->
                     <ul class="nav nav-tabs mb-4">
                         <li class="nav-item">
@@ -3013,7 +3018,7 @@ def submissions_overview():
                             </button>
                         </li>
                     </ul>
-                    
+
                     <div class="tab-content">
                         <!-- Debeka -->
                         <div class="tab-pane fade show active" id="debeka">
@@ -3069,7 +3074,7 @@ def submissions_overview():
                                 </table>
                             </div>
                         </div>
-                        
+
                         <!-- Beihilfe -->
                         <div class="tab-pane fade" id="beihilfe">
                             <div class="alert alert-success">
@@ -3124,7 +3129,7 @@ def submissions_overview():
                                 </table>
                             </div>
                         </div>
-                        
+
                         <!-- Ausstehend -->
                         <div class="tab-pane fade" id="pending">
                             <div class="alert alert-warning">
@@ -3175,7 +3180,7 @@ def submissions_overview():
                             </div>
                         </div>
                     </div>
-                    
+
                     <!-- Navigation -->
                     <div class="text-center mt-4">
                         <a href="/" class="btn btn-primary btn-lg">
@@ -3185,7 +3190,7 @@ def submissions_overview():
                 </div>
             </div>
         </div>
-        
+
         <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
         <script>
             function submitToProvider(provider, receiptId) {
@@ -3197,17 +3202,18 @@ def submissions_overview():
                                 alert(data.message);
                                 location.reload();
                             }
-                        });
+                    });
                 }
             }
-            
+
             function updateStatus(provider, receiptId) {
                 alert('Status-Update für ' + provider + ' wird geprüft... (Produktionsfeature)');
             }
-        </script>
+    </script>
     </body>
     </html>
     """, debeka_submissions=debeka_submissions, beihilfe_submissions=beihilfe_submissions, pending_submissions=pending_submissions)
+
 
 def days_since_payment(payment_date):
     """Hilfsfunktion für Tage seit Zahlung"""
@@ -3217,8 +3223,9 @@ def days_since_payment(payment_date):
         from datetime import datetime
         payment = datetime.strptime(str(payment_date), '%Y-%m-%d')
         return (datetime.now() - payment).days
-    except:
+    except Exception:
         return 0
+
 
 # Template-Funktionen registrieren für bessere Integration
 @app.template_global()
@@ -3226,15 +3233,18 @@ def days_since_payment_global(payment_date):
     """Template-globale Funktion für Tage seit Zahlung"""
     return days_since_payment(payment_date)
 
+
 @app.template_global()
 def days_overdue_global(due_date):
     """Template-globale Funktion für überfällige Tage"""
     return days_overdue(due_date)
 
+
 @app.template_global()
 def days_since_invoice_global(receipt_date):
     """Template-globale Funktion für Tage seit Rechnung"""
     return days_since_invoice(receipt_date)
+
 
 @app.template_global()
 def days_open_global(receipt_date):
@@ -3245,61 +3255,34 @@ def days_open_global(receipt_date):
         from datetime import datetime
         receipt = datetime.strptime(str(receipt_date), '%Y-%m-%d')
         return (datetime.now() - receipt).days
-    except:
+    except Exception:
         return 0
 
-# Template-Funktionen registrieren
-@app.template_global()
-def days_since_payment_global(payment_date):
-    """Template-globale Funktion für Tage seit Zahlung"""
-    return days_since_payment(payment_date)
-
-@app.template_global()
-def days_overdue_global(due_date):
-    """Template-globale Funktion für überfällige Tage"""
-    return days_overdue(due_date)
-
-@app.template_global()
-def days_since_invoice_global(receipt_date):
-    """Template-globale Funktion für Tage seit Rechnung"""
-    return days_since_invoice(receipt_date)
-
-@app.template_global()
-def days_open_global(receipt_date):
-    """Template-globale Funktion für Tage offen"""
-    if not receipt_date:
-        return 0
-    try:
-        from datetime import datetime
-        receipt = datetime.strptime(str(receipt_date), '%Y-%m-%d')
-        return (datetime.now() - receipt).days
-    except:
-        return 0
 
 # 📁 ERSTATTUNGS-UPLOAD - NEUES FEATURE
+
 @app.route('/reimbursement/upload/<receipt_id>')
 def upload_reimbursement_form(receipt_id):
     """📁 Deutscher Beihilfe-Erstattungsprozess - Bescheide hochladen"""
     conn = get_db_connection()
     cursor = conn.cursor()
-    
     cursor.execute('SELECT * FROM medical_receipts WHERE receipt_id = ?', (receipt_id,))
     receipt = cursor.fetchone()
-    
+
     if not receipt:
         flash('Beleg nicht gefunden!', 'error')
         return redirect(url_for('receipts_list'))
-    
+
     # Beihilfe-Einstellungen laden
     beihilfe_prozentsatz = float(get_setting('beihilfe_prozentsatz', 50.0))
     besoldungsgruppe = get_setting('besoldungsgruppe', 'A13')
-    
+
     # Bereits vorhandene Erstattungsbescheide laden
     cursor.execute('SELECT * FROM reimbursement_notices WHERE receipt_id = ? ORDER BY notice_date', (receipt_id,))
     existing_notices = cursor.fetchall()
-    
+
     conn.close()
-    
+
     return render_template_string("""
     <!DOCTYPE html>
     <html lang="de">
@@ -3318,20 +3301,20 @@ def upload_reimbursement_form(receipt_id):
                 cursor: pointer;
                 min-height: 120px;
             }
-            .upload-zone:hover, .upload-zone.dragover {
+        .upload-zone:hover, .upload-zone.dragover {
                 border-color: #20c997;
                 background-color: rgba(32, 201, 151, 0.1);
             }
-            .process-step {
+        .process-step {
                 border-left: 4px solid #007bff;
                 padding-left: 15px;
                 margin-bottom: 20px;
             }
-            .notice-card {
+        .notice-card {
                 border: 2px solid #28a745;
                 background: rgba(40, 167, 69, 0.1);
             }
-        </style>
+    </style>
     </head>
     <body class="bg-light">
         <div class="container mt-4">
@@ -3345,7 +3328,7 @@ def upload_reimbursement_form(receipt_id):
                             <small>Beleg: {{ receipt.receipt_id }} | Besoldungsgruppe: {{ besoldungsgruppe }} | Beihilfesatz: {{ beihilfe_prozentsatz }}%</small>
                         </div>
                         <div class="card-body p-5">
-                            
+
                             <!-- Deutscher Beihilfe-Prozess Erklärung -->
                             <div class="alert alert-primary mb-4">
                                 <h5><i class="bi bi-info-circle me-2"></i>🇩🇪 Deutscher Beihilfe-Erstattungsprozess</h5>
@@ -3376,7 +3359,7 @@ def upload_reimbursement_form(receipt_id):
                                     <strong>Erwarteter Eigenanteil: <span class="text-danger">{{ "%.2f"|format(receipt.amount * 0.1) }} € (ca. 10%)</span></strong>
                                 </div>
                             </div>
-                            
+
                             <!-- Bereits vorhandene Bescheide -->
                             {% if existing_notices %}
                             <div class="alert alert-success mb-4">
@@ -3405,9 +3388,9 @@ def upload_reimbursement_form(receipt_id):
                                 {% endfor %}
                             </div>
                             {% endif %}
-                            
+
                             <form id="reimbursementForm" method="POST" action="/reimbursement/process/{{ receipt.receipt_id }}" enctype="multipart/form-data">
-                                
+
                                 <!-- Tabs für getrennte Bescheid-Uploads -->
                                 <ul class="nav nav-tabs mb-4" id="reimbursementTabs" role="tablist">
                                     <li class="nav-item" role="presentation">
@@ -3421,7 +3404,7 @@ def upload_reimbursement_form(receipt_id):
                                         </button>
                                     </li>
                                 </ul>
-                                
+
                                 <div class="tab-content" id="reimbursementTabsContent">
                                     <!-- Debeka-Bescheid Tab -->
                                     <div class="tab-pane fade show active" id="debeka" role="tabpanel">
@@ -3429,14 +3412,14 @@ def upload_reimbursement_form(receipt_id):
                                             <h6><i class="bi bi-info-circle me-2"></i>Debeka Private Krankenversicherung</h6>
                                             <small>Reichen Sie zuerst bei Ihrer privaten Krankenversicherung (Debeka) ein. Mit dem Bescheid können Sie dann bei der Beihilfe den Restbetrag beantragen.</small>
                                         </div>
-                                        
+
                                         <div class="upload-zone mb-4" onclick="document.getElementById('debekaFile').click()">
                                             <i class="bi bi-file-earmark-medical text-danger" style="font-size: 3rem;"></i>
                                             <h5 class="mt-2">Debeka-Erstattungsbescheid hochladen</h5>
                                             <p class="text-muted">PDF des Erstattungsbescheids von der Debeka</p>
                                             <input type="file" id="debekaFile" name="debeka_notice_file" accept=".pdf,.jpg,.jpeg,.png" style="display: none;" onchange="handleDebekaUpload(event)">
                                         </div>
-                                        
+
                                         <div class="row">
                                             <div class="col-md-6">
                                                 <div class="mb-3">
@@ -3466,21 +3449,21 @@ def upload_reimbursement_form(receipt_id):
                                             </div>
                                         </div>
                                     </div>
-                                    
+
                                     <!-- Beihilfe-Bescheid Tab -->
                                     <div class="tab-pane fade" id="beihilfe" role="tabpanel">
                                         <div class="alert alert-warning">
                                             <h6><i class="bi bi-exclamation-triangle me-2"></i>Beihilfe (Besoldungsgruppe {{ besoldungsgruppe }})</h6>
                                             <small>Die Beihilfe erstattet {{ beihilfe_prozentsatz }}% der Kosten, die nicht von der privaten Krankenversicherung übernommen wurden. Legen Sie den Debeka-Bescheid bei.</small>
                                         </div>
-                                        
+
                                         <div class="upload-zone mb-4" onclick="document.getElementById('beihilfeFile').click()">
                                             <i class="bi bi-file-earmark-text text-warning" style="font-size: 3rem;"></i>
                                             <h5 class="mt-2">Beihilfe-Erstattungsbescheid hochladen</h5>
                                             <p class="text-muted">PDF des Erstattungsbescheids von der Beihilfestelle</p>
                                             <input type="file" id="beihilfeFile" name="beihilfe_notice_file" accept=".pdf,.jpg,.jpeg,.png" style="display: none;" onchange="handleBeihilfeUpload(event)">
                                         </div>
-                                        
+
                                         <div class="row">
                                             <div class="col-md-6">
                                                 <div class="mb-3">
@@ -3511,15 +3494,15 @@ def upload_reimbursement_form(receipt_id):
                                         </div>
                                     </div>
                                 </div>
-                                
+
                                 </div>
-                                
+
                                 <!-- Notizen -->
                                 <div class="mb-4">
                                     <label class="form-label">Notizen zur Erstattung</label>
                                     <textarea class="form-control" name="reimbursement_notes" rows="3" placeholder="Zusätzliche Informationen zur Erstattung..."></textarea>
                                 </div>
-                                
+
                                 <!-- Deutsche Erstattungsübersicht -->
                                 <div class="alert alert-secondary mb-4" id="reimbursementSummary">
                                     <h6><i class="bi bi-calculator me-2"></i>🇩🇪 Deutsche Erstattungsberechnung</h6>
@@ -3547,13 +3530,13 @@ def upload_reimbursement_form(receipt_id):
                                             <div class="progress-bar bg-warning" id="beihilfeBar" style="width: 0%"></div>
                                         </div>
                                         <small class="text-muted mt-2 d-block">
-                                            <span class="badge bg-info">Debeka</span> + 
-                                            <span class="badge bg-warning">Beihilfe</span> = 
+                                            <span class="badge bg-info">Debeka</span> +
+                                            <span class="badge bg-warning">Beihilfe</span> =
                                             <strong id="totalReimbursementRate">0%</strong> Erstattung
                                         </small>
                                     </div>
                                 </div>
-                                
+
                                 <!-- Submit Buttons -->
                                 <div class="d-grid gap-2 d-md-flex justify-content-md-end">
                                     <a href="/receipt/{{ receipt.receipt_id }}" class="btn btn-secondary btn-lg me-md-2">
@@ -3569,34 +3552,34 @@ def upload_reimbursement_form(receipt_id):
                 </div>
             </div>
         </div>
-        
+
         <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
         <script>
             const originalAmount = {{ receipt.amount }};
             const beihilfeProzentsatz = {{ beihilfe_prozentsatz }};
-            
+
             // 🇩🇪 DEUTSCHE BEIHILFE-LOGIK
             function updateGermanReimbursementCalculation() {
                 const debekaAmount = parseFloat(document.getElementById('debeka_amount').value) || 0;
                 const beihilfeAmount = parseFloat(document.getElementById('beihilfe_amount').value) || 0;
-                
+
                 const totalReimbursement = debekaAmount + beihilfeAmount;
                 const remainingAmount = Math.max(0, originalAmount - totalReimbursement);
                 const totalRate = originalAmount > 0 ? (totalReimbursement / originalAmount * 100) : 0;
-                
+
                 const debekaRate = originalAmount > 0 ? (debekaAmount / originalAmount * 100) : 0;
                 const beihilfeRate = originalAmount > 0 ? (beihilfeAmount / originalAmount * 100) : 0;
-                
+
                 // UI aktualisieren
                 document.getElementById('debekaReimbursement').textContent = debekaAmount.toFixed(2) + ' €';
                 document.getElementById('beihilfeReimbursement').textContent = beihilfeAmount.toFixed(2) + ' €';
                 document.getElementById('remainingAmount').textContent = remainingAmount.toFixed(2) + ' €';
                 document.getElementById('totalReimbursementRate').textContent = totalRate.toFixed(1) + '%';
-                
+
                 // Progress-Bar aktualisieren
                 document.getElementById('debekaBar').style.width = debekaRate.toFixed(1) + '%';
                 document.getElementById('beihilfeBar').style.width = beihilfeRate.toFixed(1) + '%';
-                
+
                 // Farbkodierung für Eigenanteil
                 const remainingElement = document.getElementById('remainingAmount');
                 if (remainingAmount <= originalAmount * 0.1) {
@@ -3607,7 +3590,7 @@ def upload_reimbursement_form(receipt_id):
                     remainingElement.className = 'text-danger fw-bold';
                 }
             }
-            
+
             // 📁 FILE UPLOAD HANDLERS
             function handleDebekaUpload(event) {
                 const file = event.target.files[0];
@@ -3622,7 +3605,7 @@ def upload_reimbursement_form(receipt_id):
                     uploadZone.style.backgroundColor = 'rgba(40, 167, 69, 0.1)';
                 }
             }
-            
+
             function handleBeihilfeUpload(event) {
                 const file = event.target.files[0];
                 if (file) {
@@ -3636,38 +3619,38 @@ def upload_reimbursement_form(receipt_id):
                     uploadZone.style.backgroundColor = 'rgba(40, 167, 69, 0.1)';
                 }
             }
-            
+
             // 📊 BEIHILFE-BERECHNUNG
             function calculateBeihilfeFromDebeka() {
                 const debekaAmount = parseFloat(document.getElementById('debeka_amount').value) || 0;
                 const restbetrag = Math.max(0, originalAmount - debekaAmount);
                 const expectedBeihilfe = restbetrag * (beihilfeProzentsatz / 100);
-                
+
                 // Beihilfe-Feld vorausfüllen
                 if (debekaAmount > 0 && !document.getElementById('beihilfe_amount').value) {
                     document.getElementById('beihilfe_eligible').value = restbetrag.toFixed(2);
                     document.getElementById('beihilfe_amount').value = expectedBeihilfe.toFixed(2);
                 }
             }
-            
+
             // Event-Listener
             document.getElementById('debeka_amount').addEventListener('input', function() {
                 updateGermanReimbursementCalculation();
                 calculateBeihilfeFromDebeka();
             });
-            
+
             document.getElementById('beihilfe_amount').addEventListener('input', updateGermanReimbursementCalculation);
-            
+
             // 🔧 FORM-VALIDIERUNG UND DEBUG-FEATURES
             document.getElementById('reimbursementForm').addEventListener('submit', function(e) {
                 console.log('🔍 Form-Submit gestartet...');
-                
+
                 const debekaAmount = parseFloat(document.getElementById('debeka_amount').value) || 0;
                 const beihilfeAmount = parseFloat(document.getElementById('beihilfe_amount').value) || 0;
-                
+
                 console.log('💰 Debeka-Betrag:', debekaAmount);
                 console.log('🏛️ Beihilfe-Betrag:', beihilfeAmount);
-                
+
                 // Mindestens eine Erstattung erforderlich
                 if (debekaAmount === 0 && beihilfeAmount === 0) {
                     e.preventDefault();
@@ -3676,7 +3659,7 @@ def upload_reimbursement_form(receipt_id):
                     console.error('❌ Validation failed: Keine Beträge eingegeben');
                     return false;
                 }
-                
+
                 // Beträge plausibel prüfen
                 const totalAmount = debekaAmount + beihilfeAmount;
                 if (totalAmount > originalAmount) {
@@ -3688,7 +3671,7 @@ def upload_reimbursement_form(receipt_id):
                     console.error('❌ Validation failed: Erstattung > Original');
                     return false;
                 }
-                
+
                 // Bestätigung mit Details
                 const eigenanteil = originalAmount - totalAmount;
                 const confirmMsg = `🇩🇪 Deutsche Erstattung speichern?\n\n` +
@@ -3698,21 +3681,21 @@ def upload_reimbursement_form(receipt_id):
                     `\n📊 Gesamt erstattet: ${totalAmount.toFixed(2)}€\n` +
                     `💸 Ihr Eigenanteil: ${eigenanteil.toFixed(2)}€\n\n` +
                     'Möchten Sie diese Erstattung speichern?';
-                
+
                 if (!confirm(confirmMsg)) {
                     e.preventDefault();
                     console.log('🚫 User cancelled submission');
                     return false;
                 }
-                
+
                 // Submit-Button während Verarbeitung sperren
                 const submitBtn = this.querySelector('button[type="submit"]');
                 const originalText = submitBtn.innerHTML;
                 submitBtn.innerHTML = '<i class="bi bi-hourglass-split me-2"></i>Speichere deutsche Erstattung...';
                 submitBtn.disabled = true;
-                
+
                 console.log('✅ Form-Validation erfolgreich, sende an Server...');
-                
+
                 // Nach 10 Sekunden Button wieder freigeben (falls Server-Fehler)
                 setTimeout(() => {
                     submitBtn.innerHTML = originalText;
@@ -3720,12 +3703,12 @@ def upload_reimbursement_form(receipt_id):
                     console.log('⏰ Submit-Button wieder aktiviert');
                 }, 10000);
             });
-            
+
             // Debug-Info bei Initialisierung
             console.log('🎯 BelegMeister Erstattungsformular initialisiert');
             console.log('💰 Original-Betrag:', originalAmount);
             console.log('📊 Beihilfe-Prozentsatz:', beihilfeProzentsatz);
-            
+
             // Initiale Berechnung
             updateGermanReimbursementCalculation();
         </script>
@@ -3738,25 +3721,24 @@ def process_reimbursement(receipt_id):
     """🏥 Deutscher Beihilfe-Erstattungsprozess verarbeiten"""
     try:
         logger.info(f"🏥 Starte deutsche Erstattungsverarbeitung für {receipt_id}")
-        
+
         conn = get_db_connection()
         cursor = conn.cursor()
-        
         # Beleg existiert prüfen
         cursor.execute('SELECT * FROM medical_receipts WHERE receipt_id = ?', (receipt_id,))
         receipt = cursor.fetchone()
-        
+
         if not receipt:
             flash('Beleg nicht gefunden!', 'error')
             logger.error(f"❌ Beleg {receipt_id} nicht in Datenbank gefunden")
             return redirect(url_for('receipts_list'))
-        
+
         logger.info(f"✅ Beleg gefunden: {receipt['provider_name']}, {receipt['amount']:.2f}€")
-        
+
         # 🔧 SERVER-SEITIGE VALIDIERUNG
         debeka_amount = 0.0
         beihilfe_amount = 0.0
-        
+
         try:
             debeka_amount = float(request.form.get('debeka_amount', 0))
             beihilfe_amount = float(request.form.get('beihilfe_amount', 0))
@@ -3764,31 +3746,31 @@ def process_reimbursement(receipt_id):
             logger.error(f"❌ Ungültige Beträge: debeka={request.form.get('debeka_amount')}, beihilfe={request.form.get('beihilfe_amount')}")
             flash('Ungültige Eingabe: Bitte geben Sie gültige Beträge ein!', 'error')
             return redirect(url_for('upload_reimbursement_form', receipt_id=receipt_id))
-        
+
         # Mindestens ein Betrag erforderlich
         if debeka_amount <= 0 and beihilfe_amount <= 0:
             flash('Fehler: Mindestens ein Erstattungsbetrag muss größer als 0 sein!', 'error')
             logger.warning(f"⚠️ Keine gültigen Beträge eingegeben: Debeka={debeka_amount}, Beihilfe={beihilfe_amount}")
             return redirect(url_for('upload_reimbursement_form', receipt_id=receipt_id))
-        
+
         # Plausibilitätsprüfung
         total_input = debeka_amount + beihilfe_amount
         if total_input > receipt['amount']:
             flash(f'Fehler: Erstattung ({total_input:.2f}€) kann nicht höher als Original-Rechnung ({receipt["amount"]:.2f}€) sein!', 'error')
             logger.warning(f"⚠️ Erstattung zu hoch: {total_input:.2f}€ > {receipt['amount']:.2f}€")
             return redirect(url_for('upload_reimbursement_form', receipt_id=receipt_id))
-        
+
         logger.info(f"💰 Validierung erfolgreich: Debeka={debeka_amount:.2f}€, Beihilfe={beihilfe_amount:.2f}€")
-        
+
         notices_processed = 0
         total_reimbursed = 0
-        
+
         # 📄 DEBEKA-BESCHEID VERARBEITEN
         debeka_file = request.files.get('debeka_notice_file')
-        
+
         if debeka_amount > 0:
             debeka_file_path = None
-            
+
             if debeka_file and debeka_file.filename:
                 filename = secure_filename(debeka_file.filename)
                 timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
@@ -3797,17 +3779,17 @@ def process_reimbursement(receipt_id):
                 os.makedirs('reimbursements', exist_ok=True)
                 debeka_file.save(debeka_file_path)
                 logger.info(f"Debeka-Bescheid hochgeladen: {safe_filename}")
-            
+
             # Debeka-Erstattungsrate berechnen
             debeka_rate = float(request.form.get('debeka_rate', 60.0))
             eligible_amount = receipt['amount']
-            
+
             # Debeka-Bescheid in Datenbank speichern
             cursor.execute('''
                 INSERT INTO reimbursement_notices (
                     receipt_id, notice_type, notice_number, notice_date,
-                    original_amount, eligible_amount, reimbursement_rate, 
-                    reimbursed_amount, remaining_amount, notice_file_path, 
+                    original_amount, eligible_amount, reimbursement_rate,
+                    reimbursed_amount, remaining_amount, notice_file_path,
                     processed_date, notes
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ''', (
@@ -3819,17 +3801,17 @@ def process_reimbursement(receipt_id):
                 debeka_file_path, datetime.now().strftime('%Y-%m-%d'),
                 f"Debeka PKV-Erstattung ({debeka_rate}%)"
             ))
-            
+
             notices_processed += 1
             total_reimbursed += debeka_amount
             logger.info(f"Debeka-Bescheid verarbeitet: {debeka_amount:.2f}€ ({debeka_rate}%)")
-        
+
         # 📄 BEIHILFE-BESCHEID VERARBEITEN
         beihilfe_file = request.files.get('beihilfe_notice_file')
-        
+
         if beihilfe_amount > 0:
             beihilfe_file_path = None
-            
+
             if beihilfe_file and beihilfe_file.filename:
                 filename = secure_filename(beihilfe_file.filename)
                 timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
@@ -3838,17 +3820,17 @@ def process_reimbursement(receipt_id):
                 os.makedirs('reimbursements', exist_ok=True)
                 beihilfe_file.save(beihilfe_file_path)
                 logger.info(f"Beihilfe-Bescheid hochgeladen: {safe_filename}")
-            
+
             # Beihilfe-Berechnung
             beihilfe_eligible = float(request.form.get('beihilfe_eligible', receipt['amount'] - debeka_amount))
             beihilfe_prozentsatz = float(get_setting('beihilfe_prozentsatz', 50.0))
-            
+
             # Beihilfe-Bescheid in Datenbank speichern
             cursor.execute('''
                 INSERT INTO reimbursement_notices (
                     receipt_id, notice_type, notice_number, notice_date,
-                    original_amount, eligible_amount, reimbursement_rate, 
-                    reimbursed_amount, remaining_amount, notice_file_path, 
+                    original_amount, eligible_amount, reimbursement_rate,
+                    reimbursed_amount, remaining_amount, notice_file_path,
                     processed_date, notes
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ''', (
@@ -3860,15 +3842,15 @@ def process_reimbursement(receipt_id):
                 beihilfe_file_path, datetime.now().strftime('%Y-%m-%d'),
                 f"Beihilfe-Erstattung ({beihilfe_prozentsatz}% von {beihilfe_eligible:.2f}€)"
             ))
-            
+
             notices_processed += 1
             total_reimbursed += beihilfe_amount
             logger.info(f"Beihilfe-Bescheid verarbeitet: {beihilfe_amount:.2f}€ ({beihilfe_prozentsatz}%)")
-        
+
         # 🔄 ORIGINAL-BELEG AKTUALISIEREN mit deutschen Standards
         remaining_amount = receipt['amount'] - total_reimbursed
         reimbursement_rate = (total_reimbursed / receipt['amount'] * 100) if receipt['amount'] > 0 else 0
-        
+
         cursor.execute('''
             UPDATE medical_receipts SET
                 debeka_amount = debeka_amount + ?,
@@ -3882,7 +3864,7 @@ def process_reimbursement(receipt_id):
             debeka_amount, beihilfe_amount,
             receipt_id
         ))
-        
+
         # 📊 LEGACY REIMBURSEMENT_UPLOADS für Kompatibilität
         if notices_processed > 0:
             cursor.execute('''
@@ -3896,28 +3878,28 @@ def process_reimbursement(receipt_id):
                 f"German reimbursement process: {notices_processed} notices",
                 total_reimbursed
             ))
-        
+
         conn.commit()
         conn.close()
-        
+
         # 🎉 ERFOLGS-MELDUNG mit deutscher Beihilfe-Logik
         eigenanteil = remaining_amount
         message_parts = []
-        
+
         if debeka_amount > 0:
             message_parts.append(f"Debeka: {debeka_amount:.2f}€")
         if beihilfe_amount > 0:
             message_parts.append(f"Beihilfe: {beihilfe_amount:.2f}€")
-        
+
         success_message = f"Deutsche Erstattung erfolgreich verarbeitet! "
         success_message += " + ".join(message_parts)
         success_message += f" = {total_reimbursed:.2f}€ ({reimbursement_rate:.1f}%). "
         success_message += f"Eigenanteil: {eigenanteil:.2f}€"
-        
+
         logger.info(f"Deutsche Erstattung für {receipt_id}: {total_reimbursed:.2f}€ ({reimbursement_rate:.1f}%), Eigenanteil: {eigenanteil:.2f}€")
         flash(success_message, 'success')
         return redirect(url_for('receipt_detail', receipt_id=receipt_id))
-        
+
     except Exception as e:
         logger.error(f"💥 Kritischer Fehler bei deutscher Erstattungsverarbeitung: {e}")
         logger.error(f"📄 Form-Data: {dict(request.form)}")
@@ -3926,27 +3908,27 @@ def process_reimbursement(receipt_id):
         return redirect(url_for('upload_reimbursement_form', receipt_id=receipt_id))
 
 # 📄 ERSTATTUNGSBESCHEID ANZEIGEN
+
 @app.route('/reimbursement/view/<int:notice_id>')
 def view_reimbursement_notice(notice_id):
     """📄 Erstattungsbescheid anzeigen"""
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
-        
         cursor.execute('SELECT * FROM reimbursement_notices WHERE id = ?', (notice_id,))
         notice = cursor.fetchone()
         conn.close()
-        
+
         if not notice or not notice['notice_file_path']:
             flash('Erstattungsbescheid nicht gefunden!', 'error')
             return redirect(url_for('reimbursements_overview'))
-        
+
         # Bestimme MIME-Type
         file_path = notice['notice_file_path']
         if not os.path.exists(file_path):
             flash('Bescheid-Datei nicht mehr vorhanden!', 'error')
             return redirect(url_for('reimbursements_overview'))
-        
+
         if file_path.lower().endswith('.pdf'):
             mimetype = 'application/pdf'
         elif file_path.lower().endswith(('.jpg', '.jpeg')):
@@ -3955,41 +3937,41 @@ def view_reimbursement_notice(notice_id):
             mimetype = 'image/png'
         else:
             mimetype = 'application/octet-stream'
-        
+
         return send_file(file_path, mimetype=mimetype)
-        
+
     except Exception as e:
         logger.error(f"Fehler beim Anzeigen des Erstattungsbescheids: {e}")
         flash('Fehler beim Laden des Bescheids!', 'error')
         return redirect(url_for('reimbursements_overview'))
 
 # 💰 ERSTATTUNGS-MANAGEMENT - VOLLSTÄNDIG
+
 @app.route('/reimbursements')
 def reimbursements_overview():
     """💰 Erstattungs-Übersicht"""
     conn = get_db_connection()
     cursor = conn.cursor()
-    
     # Alle Erstattungen
     cursor.execute('''
-        SELECT *, 
+        SELECT *,
                (debeka_amount + beihilfe_amount) as total_reimbursed,
                ((debeka_amount + beihilfe_amount) / amount * 100) as reimbursement_percentage
-        FROM medical_receipts 
+        FROM medical_receipts
         WHERE (debeka_amount > 0 OR beihilfe_amount > 0)
         ORDER BY updated_at DESC
     ''')
     reimbursements = cursor.fetchall()
-    
+
     # Statistiken
     cursor.execute('SELECT SUM(amount) as total_paid FROM medical_receipts WHERE payment_status = "paid"')
     total_paid = cursor.fetchone()['total_paid'] or 0
-    
+
     cursor.execute('SELECT SUM(debeka_amount + beihilfe_amount) as total_reimbursed FROM medical_receipts')
     total_reimbursed = cursor.fetchone()['total_reimbursed'] or 0
-    
+
     conn.close()
-    
+
     return render_template_string("""
     <!DOCTYPE html>
     <html lang="de">
@@ -4038,7 +4020,7 @@ def reimbursements_overview():
                             </div>
                         </div>
                     </div>
-                    
+
                     <!-- Erstattungs-Tabelle -->
                     <div class="table-responsive">
                         <table class="table table-hover">
@@ -4095,7 +4077,7 @@ def reimbursements_overview():
                             </tbody>
                         </table>
                     </div>
-                    
+
                     <!-- Navigation -->
                     <div class="text-center mt-4">
                         <a href="/" class="btn btn-primary btn-lg">
@@ -4105,7 +4087,7 @@ def reimbursements_overview():
                 </div>
             </div>
         </div>
-        
+
         <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
         <script>
             // Erstattungsfeatures sind jetzt verfügbar!
@@ -4115,43 +4097,44 @@ def reimbursements_overview():
     """, reimbursements=reimbursements, total_paid=total_paid, total_reimbursed=total_reimbursed)
 
 # ⚠️ MAHNUNGS-SYSTEM - VOLLSTÄNDIG
+
+
 @app.route('/reminders')
 def reminders_overview():
     """⚠️ Mahnungs-System"""
     conn = get_db_connection()
     cursor = conn.cursor()
-    
     # Aktive Mahnungen
     cursor.execute('''
         SELECT mr.*, pr.reminder_level, pr.sent_date, pr.due_date, pr.fee, pr.status as reminder_status
-        FROM medical_receipts mr 
-        JOIN payment_reminders pr ON mr.receipt_id = pr.receipt_id 
+        FROM medical_receipts mr
+        JOIN payment_reminders pr ON mr.receipt_id = pr.receipt_id
         WHERE pr.status = "sent"
         ORDER BY pr.due_date ASC
     ''')
     active_reminders = cursor.fetchall()
-    
+
     # Überfällige Mahnungen
     cursor.execute('''
         SELECT mr.*, pr.reminder_level, pr.sent_date, pr.due_date, pr.fee
-        FROM medical_receipts mr 
-        JOIN payment_reminders pr ON mr.receipt_id = pr.receipt_id 
+        FROM medical_receipts mr
+        JOIN payment_reminders pr ON mr.receipt_id = pr.receipt_id
         WHERE pr.status = "sent" AND pr.due_date < DATE('now')
         ORDER BY pr.due_date ASC
     ''')
     overdue_reminders = cursor.fetchall()
-    
+
     # Belege die Mahnungen benötigen
     cursor.execute('''
-        SELECT * FROM medical_receipts 
-        WHERE payment_status = "unpaid" 
+        SELECT * FROM medical_receipts
+        WHERE payment_status = "unpaid"
         AND receipt_id NOT IN (SELECT receipt_id FROM payment_reminders WHERE status = "sent")
         AND DATE(receipt_date) < DATE('now', '-30 days')
     ''')
     needs_reminder = cursor.fetchall()
-    
+
     conn.close()
-    
+
     return render_template_string("""
     <!DOCTYPE html>
     <html lang="de">
@@ -4200,7 +4183,7 @@ def reminders_overview():
                             </div>
                         </div>
                     </div>
-                    
+
                     <!-- Tabs -->
                     <ul class="nav nav-tabs mb-4">
                         <li class="nav-item">
@@ -4219,7 +4202,7 @@ def reminders_overview():
                             </button>
                         </li>
                     </ul>
-                    
+
                     <div class="tab-content">
                         <!-- Aktive Mahnungen -->
                         <div class="tab-pane fade show active" id="active">
@@ -4270,7 +4253,7 @@ def reminders_overview():
                                 </table>
                             </div>
                         </div>
-                        
+
                         <!-- Überfällige Mahnungen -->
                         <div class="tab-pane fade" id="overdue">
                             <div class="alert alert-danger">
@@ -4323,7 +4306,7 @@ def reminders_overview():
                                 </table>
                             </div>
                         </div>
-                        
+
                         <!-- Ausstehende Mahnungen -->
                         <div class="tab-pane fade" id="pending">
                             <div class="alert alert-info">
@@ -4371,7 +4354,7 @@ def reminders_overview():
                             </div>
                         </div>
                     </div>
-                    
+
                     <!-- Navigation -->
                     <div class="text-center mt-4">
                         <a href="/" class="btn btn-primary btn-lg">
@@ -4381,7 +4364,7 @@ def reminders_overview():
                 </div>
             </div>
         </div>
-        
+
         <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
         <script>
             function sendFirstReminder(receiptId) {
@@ -4389,17 +4372,17 @@ def reminders_overview():
                     alert('1. Mahnung wird versendet... (Produktionsfeature)');
                 }
             }
-            
+
             function nextReminder(receiptId) {
                 if (confirm('Nächste Mahnstufe senden?')) {
                     alert('Nächste Mahnstufe wird erstellt... (Produktionsfeature)');
                 }
             }
-            
+
             function urgentAction(receiptId) {
                 alert('Dringende Maßnahmen für überfällige Mahnung... (Produktionsfeature)');
             }
-            
+
             function markAsPaid(receiptId) {
                 if (confirm('Beleg als bezahlt markieren?')) {
                     fetch('/api/mark_paid/' + receiptId, {method: 'POST'})
@@ -4409,13 +4392,14 @@ def reminders_overview():
                                 alert('Als bezahlt markiert!');
                                 location.reload();
                             }
-                        });
+                    });
                 }
             }
-        </script>
+    </script>
     </body>
     </html>
     """, active_reminders=active_reminders, overdue_reminders=overdue_reminders, needs_reminder=needs_reminder)
+
 
 def days_overdue(due_date):
     """Hilfsfunktion für überfällige Tage"""
@@ -4425,8 +4409,10 @@ def days_overdue(due_date):
         from datetime import datetime
         due = datetime.strptime(str(due_date), '%Y-%m-%d')
         return max(0, (datetime.now() - due).days)
-    except:
+    except Exception:
         return 0
+
+
 
 def days_since_invoice(receipt_date):
     """Hilfsfunktion für Tage seit Rechnung"""
@@ -4436,10 +4422,13 @@ def days_since_invoice(receipt_date):
         from datetime import datetime
         invoice = datetime.strptime(str(receipt_date), '%Y-%m-%d')
         return (datetime.now() - invoice).days
-    except:
+    except Exception:
         return 0
 
+
 # 🔌 FEHLERBEHANDLUNG - PRODUKTIONSREIF
+
+
 @app.errorhandler(404)
 def not_found(error):
     """404 Fehlerseite"""
@@ -4499,24 +4488,23 @@ def edit_receipt(receipt_id):
     """📝 Beleg bearbeiten mit Anbieter-Integration"""
     conn = get_db_connection()
     cursor = conn.cursor()
-    
     cursor.execute('SELECT * FROM medical_receipts WHERE receipt_id = ?', (receipt_id,))
     receipt = cursor.fetchone()
-    
+
     if not receipt:
         flash('Beleg nicht gefunden!', 'error')
         return redirect(url_for('receipts_list'))
-    
+
     # Lade alle Anbieter für Dropdown
     cursor.execute('SELECT * FROM service_providers ORDER BY name')
     providers = cursor.fetchall()
-    
+
     # Suche aktuellen Anbieter in DB
     cursor.execute('SELECT * FROM service_providers WHERE name = ?', (receipt['provider_name'],))
     current_provider = cursor.fetchone()
-    
+
     conn.close()
-    
+
     return render_template_string("""
     <!DOCTYPE html>
     <html lang="de">
@@ -4553,7 +4541,7 @@ def edit_receipt(receipt_id):
                                 <small class="text-muted d-block mt-2">Datei: {{ receipt.prescription_filename or 'Unbekannt' }}</small>
                             </div>
                             {% endif %}
-                            
+
                             <form method="POST" action="/receipt/{{ receipt.receipt_id }}/update" enctype="multipart/form-data">
                                 <!-- 💊 REZEPT NACHTRÄGLICH HINZUFÜGEN -->
                                 {% if not receipt.prescription_file_path %}
@@ -4599,7 +4587,7 @@ def edit_receipt(receipt_id):
                                     </div>
                                 </div>
                                 {% endif %}
-                                
+
                                 <div class="row">
                                     <div class="col-md-6">
                                         <h5 class="text-primary mb-3">Anbieter-Informationen</h5>
@@ -4607,16 +4595,18 @@ def edit_receipt(receipt_id):
                                         <div class="mb-3">
                                             <label class="form-label">Anbieter auswählen</label>
                                             <div class="input-group">
-                                                <select class="form-select" id="provider_select" onchange="loadProviderData()">
+                                                <select class="form-select" id="provider_select"
+                                                        onchange="loadProviderData()">
                                                     <option value="">Anbieter wählen...</option>
                                                     {% for provider in providers %}
-                                                    <option value="{{ provider.id }}" 
+                                                    <option value="{{ provider.id }}"
                                                             data-name="{{ provider.name }}"
                                                             data-type="{{ provider.provider_type }}"
                                                             data-iban="{{ provider.iban or '' }}"
                                                             data-bic="{{ provider.bic or '' }}"
                                                             {{ 'selected' if provider.name == receipt.provider_name }}>
-                                                        {{ provider.name }} ({{ {'doctor': 'Arzt', 'pharmacy': 'Apotheke', 'hospital': 'Krankenhaus', 'specialist': 'Spezialist'}.get(provider.provider_type, provider.provider_type) }})
+                                                        {{ provider.name }} ({{ {'doctor': 'Arzt', 'pharmacy': 'Apotheke', 
+                                                            'hospital': 'Krankenhaus', 'specialist': 'Spezialist'}.get(provider.provider_type, provider.provider_type) }})
                                                     </option>
                                                     {% endfor %}
                                                     <option value="new">➕ Neuer Anbieter...</option>
@@ -4626,21 +4616,22 @@ def edit_receipt(receipt_id):
                                                 </a>
                                             </div>
                                         </div>
-                                        
+
                                         <div class="mb-3">
                                             <label class="form-label">Anbieter-Name *</label>
                                             <input type="text" class="form-control" name="provider_name" id="provider_name" value="{{ receipt.provider_name }}" required>
                                         </div>
                                         <div class="mb-3">
                                             <label class="form-label">Anbieter-Typ *</label>
-                                            <select class="form-select" name="provider_type" id="provider_type" required>
+                                            <select class="form-select" name="provider_type" 
+                                                    id="provider_type" required>
                                                 <option value="doctor" {{ 'selected' if receipt.provider_type == 'doctor' }}>Arzt</option>
                                                 <option value="pharmacy" {{ 'selected' if receipt.provider_type == 'pharmacy' }}>Apotheke</option>
                                                 <option value="hospital" {{ 'selected' if receipt.provider_type == 'hospital' }}>Krankenhaus</option>
                                                 <option value="specialist" {{ 'selected' if receipt.provider_type == 'specialist' }}>Spezialist</option>
                                             </select>
                                         </div>
-                                        
+
                                         <!-- 💳 BANKING-DATEN (aus Anbieter) -->
                                         {% if current_provider and current_provider.iban %}
                                         <div class="alert alert-success">
@@ -4653,7 +4644,7 @@ def edit_receipt(receipt_id):
                                         {% else %}
                                         <div class="alert alert-warning">
                                             <h6><i class="bi bi-exclamation-triangle me-2"></i>Keine Banking-Daten</h6>
-                                            <p class="mb-0">Für diesen Anbieter sind keine IBAN-Daten hinterlegt. 
+                                            <p class="mb-0">Für diesen Anbieter sind keine IBAN-Daten hinterlegt.
                                                <a href="/providers" target="_blank">Jetzt nachtragen</a>
                                             </p>
                                         </div>
@@ -4661,7 +4652,7 @@ def edit_receipt(receipt_id):
                                         <div class="mb-3">
                                             <label class="form-label">Rechnungsbetrag *</label>
                                             <div class="input-group">
-                                                <input type="number" class="form-control" name="amount" value="{{ receipt.amount }}" step="0.01" min="0" required>
+                                                <input type="number" class="form-control" name="amount"value="{{ receipt.amount }}" step="0.01" min="0" required>
                                                 <span class="input-group-text">€</span>
                                             </div>
                                         </div>
@@ -4682,7 +4673,7 @@ def edit_receipt(receipt_id):
                                         </div>
                                     </div>
                                 </div>
-                                
+
                                 <div class="row">
                                     <div class="col-md-6">
                                         <div class="mb-3">
@@ -4697,12 +4688,12 @@ def edit_receipt(receipt_id):
                                         </div>
                                     </div>
                                 </div>
-                                
+
                                 <div class="mb-4">
                                     <label class="form-label">Notizen</label>
                                     <textarea class="form-control" name="notes" rows="3" placeholder="Zusätzliche Informationen...">{{ receipt.notes or '' }}</textarea>
                                 </div>
-                                
+
                                 <!-- Status-Bearbeitung -->
                                 <div class="card bg-light mb-4">
                                     <div class="card-body">
@@ -4759,7 +4750,7 @@ def edit_receipt(receipt_id):
                                         </div>
                                     </div>
                                 </div>
-                                
+
                                 <!-- Submit Buttons -->
                                 <div class="d-grid gap-2 d-md-flex justify-content-md-end">
                                     <a href="/receipt/{{ receipt.receipt_id }}" class="btn btn-secondary btn-lg me-md-2">
@@ -4775,20 +4766,20 @@ def edit_receipt(receipt_id):
                 </div>
             </div>
         </div>
-        
+
         <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
         <script>
             // 🏥 ANBIETER-INTEGRATION für Beleg-Bearbeitung
             function loadProviderData() {
                 const select = document.getElementById('provider_select');
                 const selectedOption = select.options[select.selectedIndex];
-                
+
                 if (selectedOption.value === 'new') {
                     window.open('/provider/new', '_blank');
                     select.value = '';
                     return;
                 }
-                
+
                 if (selectedOption.value && selectedOption.value !== '') {
                     const providerData = {
                         name: selectedOption.getAttribute('data-name'),
@@ -4796,11 +4787,11 @@ def edit_receipt(receipt_id):
                         iban: selectedOption.getAttribute('data-iban'),
                         bic: selectedOption.getAttribute('data-bic')
                     };
-                    
+
                     // Felder automatisch füllen
                     document.getElementById('provider_name').value = providerData.name || '';
                     document.getElementById('provider_type').value = providerData.type || '';
-                    
+
                     console.log('✅ Anbieter-Daten für Bearbeitung geladen:', providerData);
                 } else {
                     // Felder nur leeren wenn explizit gewählt
@@ -4810,7 +4801,7 @@ def edit_receipt(receipt_id):
                     }
                 }
             }
-        </script>
+    </script>
     </body>
 
     </html>
@@ -4822,12 +4813,11 @@ def update_receipt(receipt_id):
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
-        
         # 💊 REZEPT-DATEI VERARBEITEN (falls hochgeladen)
         prescription_file = request.files.get('prescription_file')
         prescription_update_fields = ""
         prescription_update_values = []
-        
+
         if prescription_file and prescription_file.filename:
             # Lösche altes Rezept falls vorhanden
             cursor.execute('SELECT prescription_file_path FROM medical_receipts WHERE receipt_id = ?', (receipt_id,))
@@ -4838,20 +4828,20 @@ def update_receipt(receipt_id):
                     logger.info(f"💊 Altes Rezept ersetzt: {old_prescription['prescription_file_path']}")
                 except Exception as e:
                     logger.warning(f"Altes Rezept konnte nicht gelöscht werden: {e}")
-            
+
             # Neues Rezept speichern
             prescription_filename = secure_filename(prescription_file.filename)
             timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
             safe_prescription_filename = f"rx_{timestamp}_{prescription_filename}"
             prescription_file_path = os.path.join(app.config['UPLOAD_FOLDER'], safe_prescription_filename)
             prescription_file.save(prescription_file_path)
-            
+
             prescription_update_fields = ", prescription_filename = ?, prescription_file_path = ?"
             prescription_update_values = [prescription_filename, prescription_file_path]
-            
+
             logger.info(f"💊 Neues Rezept für {receipt_id} gespeichert: {safe_prescription_filename}")
             flash('Rezept erfolgreich hinzugefügt!', 'info')
-        
+
         # Hauptdaten-Update
         base_query = '''
             UPDATE medical_receipts SET
@@ -4860,9 +4850,9 @@ def update_receipt(receipt_id):
                 notes = ?, payment_status = ?, debeka_status = ?, beihilfe_status = ?,
                 debeka_amount = ?, beihilfe_amount = ?, updated_at = CURRENT_TIMESTAMP
         '''
-        
+
         update_query = base_query + prescription_update_fields + " WHERE receipt_id = ?"
-        
+
         base_values = [
             request.form['provider_name'],
             request.form['provider_type'],
@@ -4879,47 +4869,47 @@ def update_receipt(receipt_id):
             float(request.form.get('debeka_amount', 0)),
             float(request.form.get('beihilfe_amount', 0))
         ]
-        
         all_values = base_values + prescription_update_values + [receipt_id]
-        
+
         cursor.execute(update_query, all_values)
         conn.commit()
         conn.close()
-        
+
         logger.info(f"Beleg {receipt_id} erfolgreich aktualisiert")
         flash(f'Beleg {receipt_id} erfolgreich aktualisiert!', 'success')
         return redirect(url_for('receipt_detail', receipt_id=receipt_id))
-        
+
     except Exception as e:
         logger.error(f"Fehler beim Aktualisieren des Belegs: {e}")
         flash('Fehler beim Speichern der Änderungen!', 'error')
         return redirect(url_for('edit_receipt', receipt_id=receipt_id))
 
 # 🗑️ BELEG LÖSCHEN - VOLLSTÄNDIG FUNKTIONAL
+
+
 @app.route('/receipt/<receipt_id>/copy')
 def copy_receipt(receipt_id):
     """📋 Beleg kopieren - Erstellt Vorlage für neuen Beleg"""
     conn = get_db_connection()
     cursor = conn.cursor()
-    
     # Original-Beleg laden
     cursor.execute('SELECT * FROM medical_receipts WHERE receipt_id = ?', (receipt_id,))
     original_receipt = cursor.fetchone()
-    
+
     if not original_receipt:
         flash('Original-Beleg nicht gefunden!', 'error')
         return redirect(url_for('receipts_list'))
-    
+
     # Lade alle Anbieter für Dropdown
     cursor.execute('SELECT * FROM service_providers ORDER BY name')
     providers = cursor.fetchall()
-    
+
     conn.close()
-    
+
     # Heutiges Datum für neuen Beleg
     today = datetime.now().strftime('%Y-%m-%d')
     patient_name = get_setting('patient_name', 'Max Mustermann')
-    
+
     return render_template_string("""
     <!DOCTYPE html>
     <html lang="de">
@@ -4954,7 +4944,7 @@ def copy_receipt(receipt_id):
                                 </ul>
                                 <p class="mt-2 mb-0"><small>Passen Sie Datum und Betrag für den neuen Beleg an.</small></p>
                             </div>
-                            
+
                             <form method="POST" action="/receipt/create" enctype="multipart/form-data">
                                 <!-- Upload-Bereich für neuen Beleg + Rezept -->
                                 <div class="row mb-4">
@@ -4979,49 +4969,53 @@ def copy_receipt(receipt_id):
                                         </div>
                                     </div>
                                 </div>
-                                
+
                                 <div class="row">
                                     <div class="col-md-6">
                                         <h5 class="text-primary mb-3">Anbieter-Informationen</h5>
-                                        
+
                                         <!-- 🏥 ANBIETER-AUSWAHL mit vorausgewähltem Anbieter -->
                                         <div class="mb-3">
                                             <label class="form-label">Anbieter auswählen *</label>
                                             <div class="input-group">
-                                                <select class="form-select" id="provider_select" onchange="loadProviderData()">
+                                                <select class="form-select" id="provider_select"
+                                                        onchange="loadProviderData()">
                                                     <option value="">Anbieter wählen...</option>
                                                     {% for provider in providers %}
-                                                    <option value="{{ provider.id }}" 
+                                                    <option value="{{ provider.id }}"
                                                             data-name="{{ provider.name }}"
                                                             data-type="{{ provider.provider_type }}"
                                                             data-iban="{{ provider.iban or '' }}"
                                                             data-bic="{{ provider.bic or '' }}"
                                                             {{ 'selected' if provider.name == original_receipt.provider_name }}>
-                                                        {{ provider.name }} ({{ {'doctor': 'Arzt', 'pharmacy': 'Apotheke', 'hospital': 'Krankenhaus', 'specialist': 'Spezialist'}.get(provider.provider_type, provider.provider_type) }})
+                                                        {{ provider.name }} ({{ {'doctor': 'Arzt', 'pharmacy': 'Apotheke', 
+                                                            'hospital': 'Krankenhaus', 'specialist': 'Spezialist'}.get(provider.provider_type, provider.provider_type) }})
                                                     </option>
                                                     {% endfor %}
                                                     <option value="new">➕ Neuer Anbieter...</option>
                                                 </select>
-                                                <a href="/provider/new" target="_blank" class="btn btn-outline-success" title="Neuen Anbieter erstellen">
+                                                <a href="/provider/new" target="_blank" 
+                                                   class="btn btn-outline-success" title="Neuen Anbieter erstellen">
                                                     <i class="bi bi-plus-circle"></i>
                                                 </a>
                                             </div>
                                         </div>
-                                        
+
                                         <div class="mb-3">
                                             <label class="form-label">Anbieter-Name *</label>
                                             <input type="text" class="form-control" name="provider_name" id="provider_name" value="{{ original_receipt.provider_name }}" required>
                                         </div>
                                         <div class="mb-3">
                                             <label class="form-label">Anbieter-Typ *</label>
-                                            <select class="form-select" name="provider_type" id="provider_type" required>
+                                            <select class="form-select" name="provider_type" 
+                                                    id="provider_type" required>
                                                 <option value="doctor" {{ 'selected' if original_receipt.provider_type == 'doctor' }}>Arzt</option>
                                                 <option value="pharmacy" {{ 'selected' if original_receipt.provider_type == 'pharmacy' }}>Apotheke</option>
                                                 <option value="hospital" {{ 'selected' if original_receipt.provider_type == 'hospital' }}>Krankenhaus</option>
                                                 <option value="specialist" {{ 'selected' if original_receipt.provider_type == 'specialist' }}>Spezialist</option>
                                             </select>
                                         </div>
-                                        
+
                                         <div class="mb-3">
                                             <label class="form-label">Rechnungsbetrag * <small class="text-warning">(bitte anpassen)</small></label>
                                             <div class="input-group">
@@ -5048,7 +5042,7 @@ def copy_receipt(receipt_id):
                                         </div>
                                     </div>
                                 </div>
-                                
+
                                 <div class="row">
                                     <div class="col-md-6">
                                         <div class="mb-3">
@@ -5059,16 +5053,17 @@ def copy_receipt(receipt_id):
                                     <div class="col-md-6">
                                         <div class="mb-3">
                                             <label class="form-label">Rechnungsnummer</label>
-                                            <input type="text" class="form-control" name="prescription_number" placeholder="Rechnungs- oder Belegnummer">
+                                            <input type="text" class="form-control" 
+                                               name="prescription_number" placeholder="Rechnungs- oder Belegnummer">
                                         </div>
                                     </div>
                                 </div>
-                                
+
                                 <div class="mb-4">
                                     <label class="form-label">Notizen</label>
                                     <textarea class="form-control" name="notes" rows="3" placeholder="Zusätzliche Informationen...">{{ original_receipt.notes or '' }}</textarea>
                                 </div>
-                                
+
                                 <!-- Submit Buttons -->
                                 <div class="d-grid gap-2 d-md-flex justify-content-md-end">
                                     <a href="/receipts" class="btn btn-secondary btn-lg me-md-2">
@@ -5084,20 +5079,20 @@ def copy_receipt(receipt_id):
                 </div>
             </div>
         </div>
-        
+
         <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
         <script>
             // 🏥 ANBIETER-INTEGRATION für kopierte Belege
             function loadProviderData() {
                 const select = document.getElementById('provider_select');
                 const selectedOption = select.options[select.selectedIndex];
-                
+
                 if (selectedOption.value === 'new') {
                     window.open('/provider/new', '_blank');
                     select.value = '';
                     return;
                 }
-                
+
                 if (selectedOption.value && selectedOption.value !== '') {
                     const providerData = {
                         name: selectedOption.getAttribute('data-name'),
@@ -5105,28 +5100,28 @@ def copy_receipt(receipt_id):
                         iban: selectedOption.getAttribute('data-iban'),
                         bic: selectedOption.getAttribute('data-bic')
                     };
-                    
+
                     document.getElementById('provider_name').value = providerData.name || '';
                     document.getElementById('provider_type').value = providerData.type || '';
-                    
+
                     console.log('✅ Anbieter-Daten für Kopie geladen:', providerData);
                 }
             }
-            
+
             // Bei Seitenload bereits ausgewählten Anbieter laden
             document.addEventListener('DOMContentLoaded', function() {
                 const select = document.getElementById('provider_select');
                 if (select && select.value) {
                     loadProviderData();
                 }
-                
+
                 // Fokus auf Betrag setzen (das wird am häufigsten geändert)
                 const amountField = document.querySelector('input[name="amount"]');
                 if (amountField) {
                     amountField.focus();
                     amountField.select();
                 }
-            });
+        });
         </script>
     </body>
     </html>
@@ -5138,17 +5133,16 @@ def delete_receipt(receipt_id):
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
-        
         # Hole Dateiinformationen vor dem Löschen
         cursor.execute('SELECT file_path, prescription_file_path FROM medical_receipts WHERE receipt_id = ?', (receipt_id,))
         receipt = cursor.fetchone()
-        
+
         # Lösche alle verknüpften Daten in der richtigen Reihenfolge
         cursor.execute('DELETE FROM payment_reminders WHERE receipt_id = ?', (receipt_id,))
         cursor.execute('DELETE FROM reimbursement_uploads WHERE receipt_id = ?', (receipt_id,))
         cursor.execute('DELETE FROM reimbursement_notices WHERE receipt_id = ?', (receipt_id,))
         cursor.execute('DELETE FROM medical_receipts WHERE receipt_id = ?', (receipt_id,))
-        
+
         # Lösche Beleg-Datei, falls vorhanden
         if receipt and receipt['file_path'] and os.path.exists(receipt['file_path']):
             try:
@@ -5156,7 +5150,7 @@ def delete_receipt(receipt_id):
                 logger.info(f"📄 Beleg-Datei {receipt['file_path']} erfolgreich gelöscht")
             except Exception as e:
                 logger.warning(f"Beleg-Datei konnte nicht gelöscht werden: {e}")
-        
+
         # 💊 Lösche Rezept-Datei, falls vorhanden
         if receipt and receipt['prescription_file_path'] and os.path.exists(receipt['prescription_file_path']):
             try:
@@ -5164,14 +5158,14 @@ def delete_receipt(receipt_id):
                 logger.info(f"💊 Rezept-Datei {receipt['prescription_file_path']} erfolgreich gelöscht")
             except Exception as e:
                 logger.warning(f"Rezept-Datei konnte nicht gelöscht werden: {e}")
-        
+
         conn.commit()
         conn.close()
-        
+
         logger.info(f"Beleg {receipt_id} erfolgreich gelöscht")
         flash(f'Beleg {receipt_id} wurde erfolgreich gelöscht!', 'success')
         return redirect(url_for('receipts_list'))
-        
+
     except Exception as e:
         logger.error(f"Fehler beim Löschen des Belegs: {e}")
         flash('Fehler beim Löschen des Belegs!', 'error')
@@ -5183,16 +5177,15 @@ def payment_detail(receipt_id):
     """💳 Zahlungsdetails für einen Beleg"""
     conn = get_db_connection()
     cursor = conn.cursor()
-    
     cursor.execute('SELECT * FROM medical_receipts WHERE receipt_id = ?', (receipt_id,))
     receipt = cursor.fetchone()
-    
+
     if not receipt:
         flash('Beleg nicht gefunden!', 'error')
         return redirect(url_for('payments_overview'))
-    
+
     conn.close()
-    
+
     return render_template_string("""
     <!DOCTYPE html>
     <html lang="de">
@@ -5217,7 +5210,7 @@ def payment_detail(receipt_id):
                                 <h5><i class="bi bi-info-circle me-2"></i>Zahlungsoptionen</h5>
                                 <p class="mb-0">Wählen Sie Ihre bevorzugte Zahlungsmethode:</p>
                             </div>
-                            
+
                             <div class="row g-4">
                                 <div class="col-md-6">
                                     <div class="card border-success h-100">
@@ -5244,7 +5237,7 @@ def payment_detail(receipt_id):
                                     </div>
                                 </div>
                             </div>
-                            
+
                             <div class="card bg-light mt-4">
                                 <div class="card-body">
                                     <h5 class="text-dark">Zahlungsdetails</h5>
@@ -5266,7 +5259,7 @@ def payment_detail(receipt_id):
                                     </div>
                                 </div>
                             </div>
-                            
+
                             <div class="text-center mt-4">
                                 <a href="/receipt/{{ receipt.receipt_id }}" class="btn btn-secondary btn-lg me-2">
                                     <i class="bi bi-arrow-left me-2"></i>Zurück zum Beleg
@@ -5280,7 +5273,7 @@ def payment_detail(receipt_id):
                 </div>
             </div>
         </div>
-        
+
         <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
         <script>
             function markAsPaid() {
@@ -5292,10 +5285,10 @@ def payment_detail(receipt_id):
                                 alert('Als bezahlt markiert!');
                                 window.location.href = '/receipt/{{ receipt.receipt_id }}';
                             }
-                        });
+                    });
                 }
             }
-        </script>
+    </script>
     </body>
     </html>
     """, receipt=receipt)
@@ -5306,22 +5299,21 @@ def download_receipt_file(receipt_id):
     """📁 PDF/Bild-Datei herunterladen"""
     conn = get_db_connection()
     cursor = conn.cursor()
-    
     cursor.execute('SELECT original_filename, file_path FROM medical_receipts WHERE receipt_id = ?', (receipt_id,))
     result = cursor.fetchone()
     conn.close()
-    
+
     if not result or not result['file_path']:
         flash('Datei nicht gefunden!', 'error')
         return redirect(url_for('receipt_detail', receipt_id=receipt_id))
-    
+
     file_path = result['file_path']
     original_filename = result['original_filename'] or 'beleg.pdf'
-    
+
     if not os.path.exists(file_path):
         flash('Datei nicht mehr vorhanden!', 'error')
         return redirect(url_for('receipt_detail', receipt_id=receipt_id))
-    
+
     return send_file(file_path, as_attachment=True, download_name=f"{receipt_id}_{original_filename}")
 
 @app.route('/receipt/<receipt_id>/view')
@@ -5329,21 +5321,20 @@ def view_receipt_file(receipt_id):
     """📁 PDF/Bild-Datei im Browser anzeigen"""
     conn = get_db_connection()
     cursor = conn.cursor()
-    
     cursor.execute('SELECT original_filename, file_path FROM medical_receipts WHERE receipt_id = ?', (receipt_id,))
     result = cursor.fetchone()
     conn.close()
-    
+
     if not result or not result['file_path']:
         flash('Datei nicht gefunden!', 'error')
         return redirect(url_for('receipt_detail', receipt_id=receipt_id))
-    
+
     file_path = result['file_path']
-    
+
     if not os.path.exists(file_path):
         flash('Datei nicht mehr vorhanden!', 'error')
         return redirect(url_for('receipt_detail', receipt_id=receipt_id))
-    
+
     # Mime-Type bestimmen
     if file_path.lower().endswith('.pdf'):
         mimetype = 'application/pdf'
@@ -5353,7 +5344,7 @@ def view_receipt_file(receipt_id):
         mimetype = 'image/png'
     else:
         mimetype = 'application/octet-stream'
-    
+
     return send_file(file_path, mimetype=mimetype)
 
 @app.route('/receipt/<receipt_id>/preview')
@@ -5361,24 +5352,23 @@ def preview_receipt_file(receipt_id):
     """📁 PDF/Bild-Vorschau-Seite"""
     conn = get_db_connection()
     cursor = conn.cursor()
-    
     cursor.execute('SELECT * FROM medical_receipts WHERE receipt_id = ?', (receipt_id,))
     receipt = cursor.fetchone()
     conn.close()
-    
+
     if not receipt:
         flash('Beleg nicht gefunden!', 'error')
         return redirect(url_for('receipts_list'))
-    
+
     has_file = receipt['file_path'] and os.path.exists(receipt['file_path'])
     file_type = 'unknown'
-    
+
     if has_file:
         if receipt['file_path'].lower().endswith('.pdf'):
             file_type = 'pdf'
         elif receipt['file_path'].lower().endswith(('.jpg', '.jpeg', '.png')):
             file_type = 'image'
-    
+
     return render_template_string("""
     <!DOCTYPE html>
     <html lang="de">
@@ -5394,11 +5384,11 @@ def preview_receipt_file(receipt_id):
                 background: #f8f9fa;
                 min-height: 600px;
             }
-            .file-icon {
+        .file-icon {
                 font-size: 8rem;
                 color: #6c757d;
             }
-        </style>
+    </style>
     </head>
     <body class="bg-light">
         <div class="container mt-4">
@@ -5424,16 +5414,16 @@ def preview_receipt_file(receipt_id):
                             <div class="preview-container d-flex align-items-center justify-content-center">
                                 {% if has_file %}
                                     {% if file_type == 'pdf' %}
-                                        <iframe src="/receipt/{{ receipt.receipt_id }}/view" 
-                                                width="100%" height="600px" 
+                                        <iframe src="/receipt/{{ receipt.receipt_id }}/view"
+                                                width="100%" height="600px"
                                                 style="border: none; border-radius: 8px;">
-                                            <p>PDF kann nicht angezeigt werden. 
+                                            <p>PDF kann nicht angezeigt werden.
                                                <a href="/receipt/{{ receipt.receipt_id }}/download">Hier downloaden</a>
                                             </p>
                                         </iframe>
                                     {% elif file_type == 'image' %}
-                                        <img src="/receipt/{{ receipt.receipt_id }}/view" 
-                                             class="img-fluid" 
+                                        <img src="/receipt/{{ receipt.receipt_id }}/view"
+                                             class="img-fluid"
                                              style="max-height: 600px; border-radius: 8px;"
                                              alt="Beleg {{ receipt.receipt_id }}">
                                     {% else %}
@@ -5473,7 +5463,7 @@ def preview_receipt_file(receipt_id):
                                     </p>
                                 </div>
                             </div>
-                            
+
                             <div class="d-grid gap-2 mt-3">
                                 <a href="/receipt/{{ receipt.receipt_id }}" class="btn btn-primary">
                                     <i class="bi bi-arrow-left me-2"></i>Zurück zum Beleg
@@ -5492,7 +5482,7 @@ def preview_receipt_file(receipt_id):
                 </div>
             </div>
         </div>
-        
+
         <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
     </body>
     </html>
@@ -5504,22 +5494,21 @@ def download_prescription_file(receipt_id):
     """💊 Rezept-Datei herunterladen"""
     conn = get_db_connection()
     cursor = conn.cursor()
-    
     cursor.execute('SELECT prescription_filename, prescription_file_path FROM medical_receipts WHERE receipt_id = ?', (receipt_id,))
     result = cursor.fetchone()
     conn.close()
-    
+
     if not result or not result['prescription_file_path']:
         flash('Rezept-Datei nicht gefunden!', 'error')
         return redirect(url_for('receipt_detail', receipt_id=receipt_id))
-    
+
     file_path = result['prescription_file_path']
     original_filename = result['prescription_filename'] or 'rezept.pdf'
-    
+
     if not os.path.exists(file_path):
         flash('Rezept-Datei nicht mehr vorhanden!', 'error')
         return redirect(url_for('receipt_detail', receipt_id=receipt_id))
-    
+
     return send_file(file_path, as_attachment=True, download_name=f"RX_{receipt_id}_{original_filename}")
 
 @app.route('/receipt/<receipt_id>/prescription/view')
@@ -5527,19 +5516,18 @@ def view_prescription_file(receipt_id):
     """💊 Rezept-Datei im Browser anzeigen"""
     conn = get_db_connection()
     cursor = conn.cursor()
-    
     cursor.execute('SELECT prescription_file_path FROM medical_receipts WHERE receipt_id = ?', (receipt_id,))
     result = cursor.fetchone()
     conn.close()
-    
+
     if not result or not result['prescription_file_path']:
         return "Rezept-Datei nicht gefunden", 404
-    
+
     file_path = result['prescription_file_path']
-    
+
     if not os.path.exists(file_path):
         return "Rezept-Datei nicht vorhanden", 404
-    
+
     # Mime-Type bestimmen
     if file_path.lower().endswith('.pdf'):
         mimetype = 'application/pdf'
@@ -5549,7 +5537,7 @@ def view_prescription_file(receipt_id):
         mimetype = 'image/png'
     else:
         mimetype = 'application/octet-stream'
-    
+
     return send_file(file_path, mimetype=mimetype)
 
 @app.route('/receipt/<receipt_id>/prescription/preview')
@@ -5557,19 +5545,18 @@ def preview_prescription_file(receipt_id):
     """💊 Rezept-Vorschau-Seite"""
     conn = get_db_connection()
     cursor = conn.cursor()
-    
     cursor.execute('SELECT * FROM medical_receipts WHERE receipt_id = ?', (receipt_id,))
     receipt = cursor.fetchone()
     conn.close()
-    
+
     if not receipt:
         flash('Beleg nicht gefunden!', 'error')
         return redirect(url_for('receipts_list'))
-    
+
     if not receipt['prescription_file_path']:
         flash('Kein Rezept für diesen Beleg vorhanden!', 'error')
         return redirect(url_for('receipt_detail', receipt_id=receipt_id))
-    
+
     return render_template_string("""
     <!DOCTYPE html>
     <html lang="de">
@@ -5590,14 +5577,14 @@ def preview_prescription_file(receipt_id):
                 </div>
                 <div class="card-body">
                     <div class="text-center">
-                        <iframe src="/receipt/{{ receipt.receipt_id }}/prescription/view" 
-                                width="100%" height="600px" 
+                        <iframe src="/receipt/{{ receipt.receipt_id }}/prescription/view"
+                                width="100%" height="600px"
                                 style="border: 1px solid #ddd; border-radius: 8px;">
-                            <p>Rezept-Datei kann nicht angezeigt werden. 
+                            <p>Rezept-Datei kann nicht angezeigt werden.
                                <a href="/receipt/{{ receipt.receipt_id }}/prescription/download">Hier downloaden</a>
                             </p>
                         </iframe>
-                        
+
                         <div class="mt-3">
                             <a href="/receipt/{{ receipt.receipt_id }}/prescription/download" class="btn btn-success me-2">
                                 <i class="bi bi-download me-2"></i>💊 Rezept Download
@@ -5621,33 +5608,33 @@ def api_ocr_preview():
     try:
         if 'file' not in request.files:
             return jsonify({'success': False, 'message': 'Keine Datei übertragen'})
-        
+
         file = request.files['file']
         if file.filename == '':
             return jsonify({'success': False, 'message': 'Keine Datei ausgewählt'})
-        
+
         # Temporäre Datei speichern (NICHT löschen für PDF-Anzeige)
         filename = secure_filename(file.filename)
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
         temp_filename = f"temp_ocr_{timestamp}_{filename}"
         temp_path = os.path.join(app.config['UPLOAD_FOLDER'], temp_filename)
         file.save(temp_path)
-        
+
         # Temporäre File-ID für späteren Abruf
         temp_file_id = f"ocr_{timestamp}_{hashlib.md5(filename.encode()).hexdigest()[:8]}"
-        
+
         try:
             # 🤖 ECHTE OCR-ANALYSE
             ocr_result = extract_ocr_data(temp_path)
-            
+
             # Provider-Type automatisch setzen falls erkannt
             provider_type_map = {
                 'doctor': 'doctor',
-                'pharmacy': 'pharmacy', 
+                'pharmacy': 'pharmacy',
                 'hospital': 'hospital',
                 'specialist': 'specialist'
             }
-            
+
             response_data = {
                 'success': True,
                 'provider_name': ocr_result.get('provider_name', ''),
@@ -5661,18 +5648,18 @@ def api_ocr_preview():
                 'temp_filename': temp_filename,
                 'has_pdf': True if filename.lower().endswith('.pdf') else False
             }
-            
+
             logger.info(f"🎉 Live-OCR erfolgreich: {ocr_result.get('provider_name')} ({ocr_result.get('backend_used')})")
             return jsonify(response_data)
-            
+
         except Exception as e:
             # Bei Fehlern temporäre Datei trotzdem löschen
             try:
                 os.remove(temp_path)
-            except:
+            except Exception:
                 pass
             raise e
-                
+
     except Exception as e:
         logger.error(f"Live-OCR-Fehler: {e}")
         return jsonify({'success': False, 'message': f'OCR-Fehler: {str(e)}'})
@@ -5684,17 +5671,17 @@ def view_temp_file(temp_file_id):
     try:
         # Suche temporäre Datei im Upload-Ordner
         upload_folder = app.config['UPLOAD_FOLDER']
-        
+
         # Finde passende temporäre Datei
         temp_file_path = None
         for filename in os.listdir(upload_folder):
             if filename.startswith('temp_ocr_') and temp_file_id.split('_', 2)[1] in filename:
                 temp_file_path = os.path.join(upload_folder, filename)
                 break
-        
+
         if not temp_file_path or not os.path.exists(temp_file_path):
             return "Temporäre Datei nicht gefunden oder abgelaufen", 404
-        
+
         # Bestimme MIME-Type
         if temp_file_path.lower().endswith('.pdf'):
             mimetype = 'application/pdf'
@@ -5704,9 +5691,9 @@ def view_temp_file(temp_file_id):
             mimetype = 'image/png'
         else:
             mimetype = 'application/octet-stream'
-        
+
         return send_file(temp_file_path, mimetype=mimetype)
-        
+
     except Exception as e:
         logger.error(f"Fehler beim Anzeigen der temporären Datei: {e}")
         return "Fehler beim Laden der Datei", 500
@@ -5717,7 +5704,7 @@ def cleanup_temp_file(temp_file_id):
     """🗑️ Löscht temporäre OCR-Dateien nach Bestätigung"""
     try:
         upload_folder = app.config['UPLOAD_FOLDER']
-        
+
         # Finde und lösche temporäre Datei
         for filename in os.listdir(upload_folder):
             if filename.startswith('temp_ocr_') and temp_file_id.split('_', 2)[1] in filename:
@@ -5726,9 +5713,9 @@ def cleanup_temp_file(temp_file_id):
                     os.remove(temp_file_path)
                     logger.info(f"Temporäre Datei gelöscht: {filename}")
                     return jsonify({'success': True, 'message': 'Temporäre Datei gelöscht'})
-        
+
         return jsonify({'success': False, 'message': 'Temporäre Datei nicht gefunden'})
-        
+
     except Exception as e:
         logger.error(f"Fehler beim Löschen der temporären Datei: {e}")
         return jsonify({'success': False, 'message': f'Fehler: {str(e)}'})
@@ -5739,12 +5726,11 @@ def providers_list():
     """🏥 Anbieter-Verwaltung - Alle Anbieter anzeigen"""
     conn = get_db_connection()
     cursor = conn.cursor()
-    
     cursor.execute('SELECT * FROM service_providers ORDER BY name')
     providers = cursor.fetchall()
-    
+
     conn.close()
-    
+
     return render_template_string("""
     <!DOCTYPE html>
     <html lang="de">
@@ -5770,7 +5756,7 @@ def providers_list():
                             <i class="bi bi-plus-circle me-2"></i>Neuer Anbieter
                         </a>
                     </div>
-                    
+
                     <!-- Anbieter-Tabelle -->
                     <div class="table-responsive">
                         <table class="table table-hover">
@@ -5828,14 +5814,14 @@ def providers_list():
                             </tbody>
                         </table>
                     </div>
-                    
+
                     {% if not providers %}
                     <div class="alert alert-info text-center">
                         <h5><i class="bi bi-info-circle me-2"></i>Noch keine Anbieter vorhanden</h5>
                         <p class="mb-0">Erstellen Sie Ihren ersten Anbieter mit IBAN-Details für einfache Überweisungen.</p>
                     </div>
                     {% endif %}
-                    
+
                     <!-- Navigation -->
                     <div class="text-center mt-4">
                         <a href="/" class="btn btn-primary btn-lg">
@@ -5845,14 +5831,14 @@ def providers_list():
                 </div>
             </div>
         </div>
-        
+
         <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
         <script>
             function deleteProvider(providerId, providerName) {
                 var confirmMessage = '🗑️ Anbieter wirklich löschen?\\n\\n' +
                                    'Sind Sie sicher, dass Sie den Anbieter "' + providerName + '" dauerhaft löschen möchten?\\n\\n' +
                                    '⚠️ Dies betrifft nur die Anbieter-Daten, nicht die vorhandenen Belege.';
-                
+
                 if (confirm(confirmMessage)) {
                     var form = document.createElement('form');
                     form.method = 'POST';
@@ -5862,10 +5848,11 @@ def providers_list():
                     form.submit();
                 }
             }
-        </script>
+    </script>
     </body>
     </html>
     """, providers=providers)
+
 
 @app.route('/provider/new')
 def new_provider():
@@ -5939,12 +5926,13 @@ def new_provider():
                                         </div>
                                     </div>
                                 </div>
-                                
+
                                 <div class="mb-4">
                                     <label class="form-label">Notizen</label>
-                                    <textarea class="form-control" name="notes" rows="3" placeholder="Zusätzliche Informationen..."></textarea>
+                                    <textarea class="form-control" name="notes" rows="3" 
+                                              placeholder="Zusätzliche Informationen..."></textarea>
                                 </div>
-                                
+
                                 <!-- Submit Buttons -->
                                 <div class="d-grid gap-2 d-md-flex justify-content-md-end">
                                     <a href="/providers" class="btn btn-secondary btn-lg me-md-2">
@@ -5960,11 +5948,12 @@ def new_provider():
                 </div>
             </div>
         </div>
-        
+
         <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
     </body>
     </html>
     """)
+
 
 @app.route('/provider/create', methods=['POST'])
 def create_provider():
@@ -5972,10 +5961,9 @@ def create_provider():
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
-        
         cursor.execute('''
             INSERT INTO service_providers (
-                name, provider_type, address, phone, email, iban, bic, 
+                name, provider_type, address, phone, email, iban, bic,
                 contact_person, notes
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         ''', (
@@ -5989,14 +5977,14 @@ def create_provider():
             request.form.get('contact_person') or None,
             request.form.get('notes') or None
         ))
-        
+
         conn.commit()
         conn.close()
-        
+
         logger.info(f"Neuer Anbieter erstellt: {request.form['name']}")
         flash(f'Anbieter "{request.form["name"]}" erfolgreich erstellt!', 'success')
         return redirect(url_for('providers_list'))
-        
+
     except Exception as e:
         logger.error(f"Fehler beim Erstellen des Anbieters: {e}")
         flash('Fehler beim Erstellen des Anbieters!', 'error')
@@ -6007,16 +5995,15 @@ def provider_detail(provider_id):
     """🏥 Anbieter-Details anzeigen"""
     conn = get_db_connection()
     cursor = conn.cursor()
-    
     cursor.execute('SELECT * FROM service_providers WHERE id = ?', (provider_id,))
     provider = cursor.fetchone()
-    
+
     if not provider:
         flash('Anbieter nicht gefunden!', 'error')
         return redirect(url_for('providers_list'))
-    
+
     conn.close()
-    
+
     return render_template_string("""
     <!DOCTYPE html>
     <html lang="de">
@@ -6068,7 +6055,7 @@ def provider_detail(provider_id):
                             {% endif %}
                         </div>
                     </div>
-                    
+
                     <div class="mt-4">
                         <a href="/provider/{{ provider.id }}/edit" class="btn btn-warning me-2">
                             <i class="bi bi-pencil me-2"></i>Bearbeiten
@@ -6084,21 +6071,21 @@ def provider_detail(provider_id):
     </html>
     """, provider=provider)
 
+
 @app.route('/provider/<int:provider_id>/edit')
 def edit_provider(provider_id):
     """📝 Anbieter bearbeiten"""
     conn = get_db_connection()
     cursor = conn.cursor()
-    
     cursor.execute('SELECT * FROM service_providers WHERE id = ?', (provider_id,))
     provider = cursor.fetchone()
-    
+
     if not provider:
         flash('Anbieter nicht gefunden!', 'error')
         return redirect(url_for('providers_list'))
-    
+
     conn.close()
-    
+
     return render_template_string("""
     <!DOCTYPE html>
     <html lang="de">
@@ -6166,12 +6153,12 @@ def edit_provider(provider_id):
                                         </div>
                                     </div>
                                 </div>
-                                
+
                                 <div class="mb-4">
                                     <label class="form-label">Notizen</label>
                                     <textarea class="form-control" name="notes" rows="3">{{ provider.notes or '' }}</textarea>
                                 </div>
-                                
+
                                 <div class="d-grid gap-2 d-md-flex justify-content-md-end">
                                     <a href="/provider/{{ provider.id }}" class="btn btn-secondary btn-lg me-md-2">
                                         <i class="bi bi-x-circle me-2"></i>Abbrechen
@@ -6190,16 +6177,16 @@ def edit_provider(provider_id):
     </html>
     """, provider=provider)
 
+
 @app.route('/provider/<int:provider_id>/update', methods=['POST'])
 def update_provider(provider_id):
     """📝 Anbieter-Update verarbeiten"""
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
-        
         cursor.execute('''
             UPDATE service_providers SET
-                name = ?, provider_type = ?, address = ?, phone = ?, email = ?, 
+                name = ?, provider_type = ?, address = ?, phone = ?, email = ?,
                 iban = ?, bic = ?, contact_person = ?, notes = ?, updated_at = CURRENT_TIMESTAMP
             WHERE id = ?
         ''', (
@@ -6214,14 +6201,14 @@ def update_provider(provider_id):
             request.form.get('notes') or None,
             provider_id
         ))
-        
+
         conn.commit()
         conn.close()
-        
+
         logger.info(f"Anbieter {provider_id} erfolgreich aktualisiert")
         flash(f'Anbieter "{request.form["name"]}" erfolgreich aktualisiert!', 'success')
         return redirect(url_for('provider_detail', provider_id=provider_id))
-        
+
     except Exception as e:
         logger.error(f"Fehler beim Aktualisieren des Anbieters: {e}")
         flash('Fehler beim Speichern der Änderungen!', 'error')
@@ -6233,20 +6220,22 @@ def delete_provider(provider_id):
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
-        
         cursor.execute('DELETE FROM service_providers WHERE id = ?', (provider_id,))
-        
+
         conn.commit()
         conn.close()
-        
+
         logger.info(f"Anbieter {provider_id} erfolgreich gelöscht")
         flash('Anbieter erfolgreich gelöscht!', 'success')
         return redirect(url_for('providers_list'))
-        
+
+
+
     except Exception as e:
         logger.error(f"Fehler beim Löschen des Anbieters: {e}")
         flash('Fehler beim Löschen des Anbieters!', 'error')
         return redirect(url_for('providers_list'))
+
 
 if __name__ == "__main__":
     print("\n" + "="*80)
@@ -6256,6 +6245,8 @@ if __name__ == "__main__":
     print("📄 Upload-Meister:     http://localhost:5031/receipt/new")
     print("📋 Beleg-Meister:      http://localhost:5031/receipts")
     print("🏥 Provider-Meister:   http://localhost:5031/providers")
+
+
     print("💳 Pay-Meister:       http://localhost:5031/payments")
     print("📤 Track-Meister:     http://localhost:5031/submissions")
     print("💰 Money-Meister:     http://localhost:5031/reimbursements")
@@ -6265,6 +6256,6 @@ if __name__ == "__main__":
     print("🎯 DER MEISTER FÜR MEDIZINISCHE BELEGE!")
     print("🤖 OCR-MEISTER • PAY-MEISTER • TRACK-MEISTER!")
     print("="*80 + "\n")
-    
+
     port = int(os.environ.get("PORT", 5031))
-    app.run(debug=True, host="0.0.0.0", port=port) 
+    app.run(debug=True, host="0.0.0.0", port=port)    
