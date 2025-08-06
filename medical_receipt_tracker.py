@@ -104,17 +104,20 @@ def init_database():
             patient_name TEXT NOT NULL,
             diagnosis_code TEXT,
             prescription_number TEXT,
-            payment_status TEXT DEFAULT 'unpaid' 
+            payment_status TEXT DEFAULT 'unpaid'
                 CHECK(payment_status IN ('unpaid', 'paid', 'reminded_1', 'reminded_2', 'overdue')),
             payment_date DATE,
             payment_method TEXT,
             girocode_generated BOOLEAN DEFAULT 0,
             submission_status TEXT DEFAULT 'not_submitted' 
-                CHECK(submission_status IN ('not_submitted', 'submitted_debeka', 'submitted_beihilfe', 'submitted_both')),
+                CHECK(submission_status IN ('not_submitted', 'submitted_debeka', 
+                    'submitted_beihilfe', 'submitted_both')),
             debeka_status TEXT DEFAULT 'none' 
-                CHECK(debeka_status IN ('none', 'submitted', 'processing', 'approved', 'rejected', 'paid')),
+                CHECK(debeka_status IN ('none', 'submitted', 'processing', 
+                    'approved', 'rejected', 'paid')),
             beihilfe_status TEXT DEFAULT 'none' 
-                CHECK(beihilfe_status IN ('none', 'submitted', 'processing', 'approved', 'rejected', 'paid')),
+                CHECK(beihilfe_status IN ('none', 'submitted', 'processing', 
+                    'approved', 'rejected', 'paid')),
             debeka_submission_date DATE,
             beihilfe_submission_date DATE,
             debeka_amount REAL DEFAULT 0,
@@ -236,15 +239,19 @@ def init_database():
     logger.info("Datenbank erfolgreich initialisiert")
 
 # 🔧 HILFSFUNKTIONEN
+
+
 def get_db_connection():
     """Thread-sichere Datenbankverbindung"""
     conn = sqlite3.connect('medical_receipts.db')
     conn.row_factory = sqlite3.Row
     return conn
 
+
 def generate_receipt_id():
     """Generiere eindeutige Belegnummer"""
     return f"MED-{datetime.now().strftime('%Y%m%d')}-{uuid.uuid4().hex[:6].upper()}"
+
 
 def get_setting(key, default=None):
     """Hole Systemeinstellung"""
@@ -254,6 +261,7 @@ def get_setting(key, default=None):
     result = cursor.fetchone()
     conn.close()
     return result['value'] if result else default
+
 
 def update_setting(key, value):
     """Update Systemeinstellung"""
@@ -265,6 +273,7 @@ def update_setting(key, value):
     ''', (key, value))
     conn.commit()
     conn.close()
+
 
 def extract_ocr_data(file_path):
     """🤖 ULTIMATIVE KI-OCR-ENGINE - MULTI-BACKEND mit INTELLIGENTER AUSWAHL"""
@@ -313,7 +322,7 @@ def extract_ocr_data(file_path):
                     logger.info("🏆 Hohe Confidence erreicht, stoppe weitere Versuche")
                     break
 
-        except Exception:
+        except Exception as e:
             logger.warning(f"❌ {backend_name.upper()} OCR fehlgeschlagen: {e}")
             result['errors'].append(f"{backend_name}: {e}")
             continue
@@ -351,7 +360,7 @@ def extract_with_tesseract(file_path):
                         custom_config = r'--oem 3 --psm 6 -l deu'
                         text += pytesseract.image_to_string(image, config=custom_config) + "\n"
 
-            except Exception:
+            except Exception as e:
                 logger.error(f"PDF-Verarbeitung fehlgeschlagen: {e}")
                 return None
 
@@ -373,7 +382,7 @@ def extract_with_tesseract(file_path):
                 custom_config = r'--oem 3 --psm 6 -l deu'
                 text = pytesseract.image_to_string(image, config=custom_config)
 
-            except Exception:
+            except Exception as e:
                 logger.error(f"Bild-OCR fehlgeschlagen: {e}")
                 return None
 
@@ -447,6 +456,7 @@ def extract_with_azure_vision(file_path):
 
 def analyze_german_text(text, confidence_bonus=0.0):
     """🇩🇪 DEUTSCHE TEXT-ANALYSE mit KI-Mustern"""
+    import re
     result = {
         'provider_name': '',
         'amount': '0.00',
@@ -910,27 +920,30 @@ def new_receipt():
                                 <div class="row mb-4">
                                     <div class="col-md-8">
                                         <div class="upload-zone" onclick="document.getElementById('fileInput').click()">
-                                            <i class="bi bi-file-earmark-medical text-primary" 
+                                            <i class="bi bi-file-earmark-medical text-primary"
                                                style="font-size: 3rem;"></i>
                                             <h4 class="mt-3">📄 Beleg-Scan hochladen</h4>
                                             <p class="text-muted">PDF, JPG, PNG - Automatische OCR-Erkennung</p>
-                                            <input type="file" id="fileInput" name="receipt_file" 
-                                                   accept=".pdf,.jpg,.jpeg,.png" style="display: none;" 
+                                            <input type="file" id="fileInput" name="receipt_file"
+                                                   accept=".pdf,.jpg,.jpeg,.png" style="display: none;"
                                                    onchange="handleFileUpload(event)">
                                         </div>
                                     </div>
                                     <div class="col-md-4">
                                         <div class="card border-success h-100">
-                                            <div class="card-body text-center d-flex flex-column justify-content-center" 
-                                                 style="cursor: pointer;" 
+                                            <div class="card-body text-center d-flex flex-column justify-content-center"
+                                                 style="cursor: pointer;"
                                                  onclick="document.getElementById('prescriptionInput').click()">
-                                                <i class="bi bi-prescription2 text-success" style="font-size: 2.5rem;"></i>
+                                                <i class="bi bi-prescription2 text-success" 
+                                                   style="font-size: 2.5rem;"></i>
                                                 <h5 class="mt-2">💊 Rezept</h5>
                                                 <p class="text-muted small">Optional hinzufügen</p>
-                                                <input type="file" id="prescriptionInput" name="prescription_file" 
-                                                       accept=".pdf,.jpg,.jpeg,.png" style="display: none;" 
+                                                <input type="file" id="prescriptionInput" name="prescription_file"
+                                                       accept=".pdf,.jpg,.jpeg,.png" style="display: none;"
                                                        onchange="handlePrescriptionUpload(event)">
-                                                <small id="prescriptionStatus" class="text-muted">Kein Rezept ausgewählt</small>
+                                                <small id="prescriptionStatus" class="text-muted">
+                                                    Kein Rezept ausgewählt
+                                                </small>
                                             </div>
                                         </div>
                                     </div>
@@ -940,19 +953,22 @@ def new_receipt():
                                 <div id="ocrStatus" style="display: none;" class="alert alert-info mb-4">
                                     <h5><i class="bi bi-gear-fill me-2"></i>OCR-Verarbeitung...</h5>
                                     <div class="progress">
-                                        <div class="progress-bar progress-bar-striped progress-bar-animated" style="width: 0%"></div>
+                                        <div class="progress-bar progress-bar-striped progress-bar-animated" 
+                                             style="width: 0%"></div>
                                     </div>
                                 </div>
 
                                 <!-- 📁 PDF-VORSCHAU für Abgleich -->
                                 <div id="pdfPreview" style="display: none;" class="card mb-4 border-success">
-                                    <div class="card-header bg-success text-white d-flex justify-content-between align-items-center">
+                                    <div class="card-header bg-success text-white d-flex 
+                                         justify-content-between align-items-center">
                                         <h5 class="mb-0">
                                             <i class="bi bi-file-earmark-pdf me-2"></i>Hochgeladenes Dokument
                                         </h5>
                                         <div>
                                             <small class="me-3">Vergleichen Sie die OCR-Daten mit dem Original</small>
-                                            <button type="button" class="btn btn-sm btn-outline-light" onclick="hidePdfPreview()">
+                                            <button type="button" class="btn btn-sm btn-outline-light" 
+                                                    onclick="hidePdfPreview()">
                                                 <i class="bi bi-x-circle"></i>
                                             </button>
                                         </div>
@@ -960,7 +976,8 @@ def new_receipt():
                                     <div class="card-body p-0">
                                         <div class="row g-0">
                                             <div class="col-md-8">
-                                                <div style="height: 400px; overflow: auto; border-right: 1px solid #dee2e6;">
+                                                <div style="height: 400px; overflow: auto; 
+                                                     border-right: 1px solid #dee2e6;">
                                                     <iframe id="pdfViewer"
                                                             src=""
                                                             width="100%"
@@ -977,7 +994,8 @@ def new_receipt():
                                                         <p class="text-muted">OCR-Daten werden hier angezeigt...</p>
                                                     </div>
                                                     <div class="mt-3">
-                                                        <button type="button" class="btn btn-success btn-sm w-100" onclick="acceptOcrData()">
+                                                        <button type="button" class="btn btn-success btn-sm w-100" 
+                                                                onclick="acceptOcrData()">
                                                             <i class="bi bi-check-circle me-2"></i>Daten sind korrekt
                                                         </button>
                                                     </div>
@@ -996,7 +1014,8 @@ def new_receipt():
                                         <div class="mb-3">
                                             <label class="form-label">Anbieter auswählen *</label>
                                             <div class="input-group">
-                                                <select class="form-select" id="provider_select" onchange="loadProviderData()">
+                                                <select class="form-select" id="provider_select" 
+                                                        onchange="loadProviderData()">
                                                     <option value="">Anbieter wählen...</option>
                                                     {% for provider in providers %}
                                                     <option value="{{ provider.id }}"
@@ -1020,7 +1039,9 @@ def new_receipt():
                                         <!-- Anbieter-Details (werden automatisch gefüllt) -->
                                         <div class="mb-3">
                                             <label class="form-label">Anbieter-Name *</label>
-                                            <input type="text" class="form-control" name="provider_name" id="provider_name" required placeholder="Wird automatisch gefüllt...">
+                                            <input type="text" class="form-control" name="provider_name" 
+                                                   id="provider_name" required 
+                                                   placeholder="Wird automatisch gefüllt...">
                                         </div>
                                         <div class="mb-3">
                                             <label class="form-label">Anbieter-Typ *</label>
@@ -1037,14 +1058,19 @@ def new_receipt():
                                         <div class="row">
                                             <div class="col-md-6">
                                                 <div class="mb-3">
-                                                    <label class="form-label">IBAN <i class="bi bi-info-circle text-info" title="Wird automatisch aus Anbieter-Daten geladen"></i></label>
-                                                    <input type="text" class="form-control" id="provider_iban" readonly placeholder="Aus Anbieter-Daten">
+                                                    <label class="form-label">IBAN 
+                                                        <i class="bi bi-info-circle text-info" 
+                                                           title="Wird automatisch aus Anbieter-Daten geladen"></i>
+                                                    </label>
+                                                    <input type="text" class="form-control" id="provider_iban" 
+                                                           readonly placeholder="Aus Anbieter-Daten">
                                                 </div>
                                             </div>
                                             <div class="col-md-6">
                                                 <div class="mb-3">
                                                     <label class="form-label">BIC</label>
-                                                    <input type="text" class="form-control" id="provider_bic" readonly placeholder="Aus Anbieter-Daten">
+                                                    <input type="text" class="form-control" id="provider_bic" 
+                                                           readonly placeholder="Aus Anbieter-Daten">
                                                 </div>
                                             </div>
                                         </div>
@@ -1052,7 +1078,8 @@ def new_receipt():
                                         <div class="mb-3">
                                             <label class="form-label">Rechnungsbetrag *</label>
                                             <div class="input-group">
-                                                <input type="number" class="form-control" name="amount" id="amount" step="0.01" min="0" required>
+                                                <input type="number" class="form-control" name="amount" 
+                                                       id="amount" step="0.01" min="0" required>
                                                 <span class="input-group-text">€</span>
                                             </div>
                                         </div>
@@ -1061,7 +1088,8 @@ def new_receipt():
                                         <h5 class="text-success mb-3">Behandlungs-Details</h5>
                                         <div class="mb-3">
                                             <label class="form-label">Rechnungsdatum *</label>
-                                            <input type="date" class="form-control" name="receipt_date" id="receipt_date" required>
+                                            <input type="date" class="form-control" name="receipt_date" 
+                                                   id="receipt_date" required>
                                         </div>
                                         <div class="mb-3">
                                             <label class="form-label">Behandlungsdatum</label>
@@ -1257,7 +1285,7 @@ def new_receipt():
                 alert.innerHTML = `
                     <i class="bi bi-robot me-2"></i>
                     <strong>🤖 KI-OCR erfolgreich!</strong> ${ocrData.message || 'Daten automatisch erkannt'}
-                    <br><small><strong>Engine:</strong> ${ocrData.backend_used || 'unbekannt'} | 
+                    <br><small><strong>Engine:</strong> ${ocrData.backend_used || 'unbekannt'} |
                     <strong>Confidence:</strong> ${ocrData.confidence || 0}</small>
                     <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
                 `;
@@ -3184,21 +3212,25 @@ def days_since_payment(payment_date):
     except Exception:
         return 0
 
+
 # Template-Funktionen registrieren für bessere Integration
 @app.template_global()
 def days_since_payment_global(payment_date):
     """Template-globale Funktion für Tage seit Zahlung"""
     return days_since_payment(payment_date)
 
+
 @app.template_global()
 def days_overdue_global(due_date):
     """Template-globale Funktion für überfällige Tage"""
     return days_overdue(due_date)
 
+
 @app.template_global()
 def days_since_invoice_global(receipt_date):
     """Template-globale Funktion für Tage seit Rechnung"""
     return days_since_invoice(receipt_date)
+
 
 @app.template_global()
 def days_open_global(receipt_date):
@@ -4363,6 +4395,7 @@ def days_overdue(due_date):
     except Exception:
         return 0
 
+
 def days_since_invoice(receipt_date):
     """Hilfsfunktion für Tage seit Rechnung"""
     if not receipt_date:
@@ -4374,7 +4407,10 @@ def days_since_invoice(receipt_date):
     except Exception:
         return 0
 
+
 # 🔌 FEHLERBEHANDLUNG - PRODUKTIONSREIF
+
+
 @app.errorhandler(404)
 def not_found(error):
     """404 Fehlerseite"""
@@ -4541,7 +4577,8 @@ def edit_receipt(receipt_id):
                                         <div class="mb-3">
                                             <label class="form-label">Anbieter auswählen</label>
                                             <div class="input-group">
-                                                <select class="form-select" id="provider_select" onchange="loadProviderData()">
+                                                <select class="form-select" id="provider_select" 
+                                                        onchange="loadProviderData()">
                                                     <option value="">Anbieter wählen...</option>
                                                     {% for provider in providers %}
                                                     <option value="{{ provider.id }}"
@@ -4587,7 +4624,7 @@ def edit_receipt(receipt_id):
                                         {% else %}
                                         <div class="alert alert-warning">
                                             <h6><i class="bi bi-exclamation-triangle me-2"></i>Keine Banking-Daten</h6>
-                                            <p class="mb-0">Für diesen Anbieter sind keine IBAN-Daten hinterlegt. 
+                                            <p class="mb-0">Für diesen Anbieter sind keine IBAN-Daten hinterlegt.
                                                <a href="/providers" target="_blank">Jetzt nachtragen</a>
                                             </p>
                                         </div>
@@ -4769,7 +4806,7 @@ def update_receipt(receipt_id):
                 try:
                     os.remove(old_prescription['prescription_file_path'])
                     logger.info(f"💊 Altes Rezept ersetzt: {old_prescription['prescription_file_path']}")
-                except Exception:
+                except Exception as e:
                     logger.warning(f"Altes Rezept konnte nicht gelöscht werden: {e}")
 
             # Neues Rezept speichern
@@ -4919,7 +4956,8 @@ def copy_receipt(receipt_id):
                                         <div class="mb-3">
                                             <label class="form-label">Anbieter auswählen *</label>
                                             <div class="input-group">
-                                                <select class="form-select" id="provider_select" onchange="loadProviderData()">
+                                                <select class="form-select" id="provider_select" 
+                                                        onchange="loadProviderData()">
                                                     <option value="">Anbieter wählen...</option>
                                                     {% for provider in providers %}
                                                     <option value="{{ provider.id }}"
@@ -5084,7 +5122,7 @@ def delete_receipt(receipt_id):
             try:
                 os.remove(receipt['file_path'])
                 logger.info(f"📄 Beleg-Datei {receipt['file_path']} erfolgreich gelöscht")
-            except Exception:
+            except Exception as e:
                 logger.warning(f"Beleg-Datei konnte nicht gelöscht werden: {e}")
 
         # 💊 Lösche Rezept-Datei, falls vorhanden
@@ -5092,7 +5130,7 @@ def delete_receipt(receipt_id):
             try:
                 os.remove(receipt['prescription_file_path'])
                 logger.info(f"💊 Rezept-Datei {receipt['prescription_file_path']} erfolgreich gelöscht")
-            except Exception:
+            except Exception as e:
                 logger.warning(f"Rezept-Datei konnte nicht gelöscht werden: {e}")
 
         conn.commit()
@@ -5588,7 +5626,7 @@ def api_ocr_preview():
             logger.info(f"🎉 Live-OCR erfolgreich: {ocr_result.get('provider_name')} ({ocr_result.get('backend_used')})")
             return jsonify(response_data)
 
-        except Exception:
+        except Exception as e:
             # Bei Fehlern temporäre Datei trotzdem löschen
             try:
                 os.remove(temp_path)
@@ -5789,6 +5827,7 @@ def providers_list():
     </html>
     """, providers=providers)
 
+
 @app.route('/provider/new')
 def new_provider():
     """🏥 Neuen Anbieter erstellen"""
@@ -5887,6 +5926,7 @@ def new_provider():
     </body>
     </html>
     """)
+
 
 @app.route('/provider/create', methods=['POST'])
 def create_provider():
@@ -6004,6 +6044,7 @@ def provider_detail(provider_id):
     </html>
     """, provider=provider)
 
+
 @app.route('/provider/<int:provider_id>/edit')
 def edit_provider(provider_id):
     """📝 Anbieter bearbeiten"""
@@ -6109,6 +6150,7 @@ def edit_provider(provider_id):
     </html>
     """, provider=provider)
 
+
 @app.route('/provider/<int:provider_id>/update', methods=['POST'])
 def update_provider(provider_id):
     """📝 Anbieter-Update verarbeiten"""
@@ -6186,4 +6228,4 @@ if __name__ == "__main__":
     print("="*80 + "\n")
 
     port = int(os.environ.get("PORT", 5031))
-    app.run(debug=True, host="0.0.0.0", port=port)                        
+    app.run(debug=True, host="0.0.0.0", port=port)                
