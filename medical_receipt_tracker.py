@@ -69,6 +69,8 @@ os.makedirs('receipts', exist_ok=True)
 os.makedirs('reimbursements', exist_ok=True)
 
 # 💾 PRODUKTIONSREIFE DATENBANK
+
+
 def init_database():
     """Initialisiere SQLite-Datenbank mit allen Tabellen"""
     conn = sqlite3.connect('medical_receipts.db')
@@ -109,13 +111,13 @@ def init_database():
             payment_date DATE,
             payment_method TEXT,
             girocode_generated BOOLEAN DEFAULT 0,
-            submission_status TEXT DEFAULT 'not_submitted' 
+            submission_status TEXT DEFAULT 'not_submitted'
                 CHECK(submission_status IN ('not_submitted', 'submitted_debeka', 
                     'submitted_beihilfe', 'submitted_both')),
-            debeka_status TEXT DEFAULT 'none' 
+            debeka_status TEXT DEFAULT 'none'
                 CHECK(debeka_status IN ('none', 'submitted', 'processing', 
                     'approved', 'rejected', 'paid')),
-            beihilfe_status TEXT DEFAULT 'none' 
+            beihilfe_status TEXT DEFAULT 'none'
                 CHECK(beihilfe_status IN ('none', 'submitted', 'processing', 
                     'approved', 'rejected', 'paid')),
             debeka_submission_date DATE,
@@ -934,7 +936,7 @@ def new_receipt():
                                             <div class="card-body text-center d-flex flex-column justify-content-center"
                                                  style="cursor: pointer;"
                                                  onclick="document.getElementById('prescriptionInput').click()">
-                                                <i class="bi bi-prescription2 text-success" 
+                                                <i class="bi bi-prescription2 text-success"
                                                    style="font-size: 2.5rem;"></i>
                                                 <h5 class="mt-2">💊 Rezept</h5>
                                                 <p class="text-muted small">Optional hinzufügen</p>
@@ -953,21 +955,21 @@ def new_receipt():
                                 <div id="ocrStatus" style="display: none;" class="alert alert-info mb-4">
                                     <h5><i class="bi bi-gear-fill me-2"></i>OCR-Verarbeitung...</h5>
                                     <div class="progress">
-                                        <div class="progress-bar progress-bar-striped progress-bar-animated" 
+                                        <div class="progress-bar progress-bar-striped progress-bar-animated"
                                              style="width: 0%"></div>
                                     </div>
                                 </div>
 
                                 <!-- 📁 PDF-VORSCHAU für Abgleich -->
                                 <div id="pdfPreview" style="display: none;" class="card mb-4 border-success">
-                                    <div class="card-header bg-success text-white d-flex 
+                                    <div class="card-header bg-success text-white d-flex
                                          justify-content-between align-items-center">
                                         <h5 class="mb-0">
                                             <i class="bi bi-file-earmark-pdf me-2"></i>Hochgeladenes Dokument
                                         </h5>
                                         <div>
                                             <small class="me-3">Vergleichen Sie die OCR-Daten mit dem Original</small>
-                                            <button type="button" class="btn btn-sm btn-outline-light" 
+                                            <button type="button" class="btn btn-sm btn-outline-light"
                                                     onclick="hidePdfPreview()">
                                                 <i class="bi bi-x-circle"></i>
                                             </button>
@@ -976,7 +978,7 @@ def new_receipt():
                                     <div class="card-body p-0">
                                         <div class="row g-0">
                                             <div class="col-md-8">
-                                                <div style="height: 400px; overflow: auto; 
+                                                <div style="height: 400px; overflow: auto;
                                                      border-right: 1px solid #dee2e6;">
                                                     <iframe id="pdfViewer"
                                                             src=""
@@ -994,7 +996,7 @@ def new_receipt():
                                                         <p class="text-muted">OCR-Daten werden hier angezeigt...</p>
                                                     </div>
                                                     <div class="mt-3">
-                                                        <button type="button" class="btn btn-success btn-sm w-100" 
+                                                        <button type="button" class="btn btn-success btn-sm w-100"
                                                                 onclick="acceptOcrData()">
                                                             <i class="bi bi-check-circle me-2"></i>Daten sind korrekt
                                                         </button>
@@ -1014,7 +1016,7 @@ def new_receipt():
                                         <div class="mb-3">
                                             <label class="form-label">Anbieter auswählen *</label>
                                             <div class="input-group">
-                                                <select class="form-select" id="provider_select" 
+                                                <select class="form-select" id="provider_select"
                                                         onchange="loadProviderData()">
                                                     <option value="">Anbieter wählen...</option>
                                                     {% for provider in providers %}
@@ -1025,12 +1027,14 @@ def new_receipt():
                                                             data-bic="{{ provider.bic or '' }}"
                                                             data-phone="{{ provider.phone or '' }}"
                                                             data-email="{{ provider.email or '' }}">
-                                                        {{ provider.name }} ({{ {'doctor': 'Arzt', 'pharmacy': 'Apotheke', 'hospital': 'Krankenhaus', 'specialist': 'Spezialist'}.get(provider.provider_type, provider.provider_type) }})
+                                                        {{ provider.name }} ({{ {'doctor': 'Arzt', 'pharmacy': 'Apotheke', 
+                                                            'hospital': 'Krankenhaus', 'specialist': 'Spezialist'}.get(provider.provider_type, provider.provider_type) }})
                                                     </option>
                                                     {% endfor %}
                                                     <option value="new">➕ Neuer Anbieter...</option>
                                                 </select>
-                                                <a href="/provider/new" target="_blank" class="btn btn-outline-success" title="Neuen Anbieter erstellen">
+                                                <a href="/provider/new" target="_blank" 
+                                                   class="btn btn-outline-success" title="Neuen Anbieter erstellen">
                                                     <i class="bi bi-plus-circle"></i>
                                                 </a>
                                             </div>
@@ -1039,13 +1043,14 @@ def new_receipt():
                                         <!-- Anbieter-Details (werden automatisch gefüllt) -->
                                         <div class="mb-3">
                                             <label class="form-label">Anbieter-Name *</label>
-                                            <input type="text" class="form-control" name="provider_name" 
-                                                   id="provider_name" required 
+                                            <input type="text" class="form-control" name="provider_name"
+                                                   id="provider_name" required
                                                    placeholder="Wird automatisch gefüllt...">
                                         </div>
                                         <div class="mb-3">
                                             <label class="form-label">Anbieter-Typ *</label>
-                                            <select class="form-select" name="provider_type" id="provider_type" required>
+                                            <select class="form-select" name="provider_type" 
+                                                    id="provider_type" required>
                                                 <option value="">Typ wählen...</option>
                                                 <option value="doctor">Arzt</option>
                                                 <option value="pharmacy">Apotheke</option>
@@ -1058,18 +1063,18 @@ def new_receipt():
                                         <div class="row">
                                             <div class="col-md-6">
                                                 <div class="mb-3">
-                                                    <label class="form-label">IBAN 
+                                                    <label class="form-label">IBAN
                                                         <i class="bi bi-info-circle text-info" 
                                                            title="Wird automatisch aus Anbieter-Daten geladen"></i>
                                                     </label>
-                                                    <input type="text" class="form-control" id="provider_iban" 
+                                                    <input type="text" class="form-control" id="provider_iban"
                                                            readonly placeholder="Aus Anbieter-Daten">
                                                 </div>
                                             </div>
                                             <div class="col-md-6">
                                                 <div class="mb-3">
                                                     <label class="form-label">BIC</label>
-                                                    <input type="text" class="form-control" id="provider_bic" 
+                                                    <input type="text" class="form-control" id="provider_bic"
                                                            readonly placeholder="Aus Anbieter-Daten">
                                                 </div>
                                             </div>
@@ -1078,7 +1083,7 @@ def new_receipt():
                                         <div class="mb-3">
                                             <label class="form-label">Rechnungsbetrag *</label>
                                             <div class="input-group">
-                                                <input type="number" class="form-control" name="amount" 
+                                                <input type="number" class="form-control" name="amount"
                                                        id="amount" step="0.01" min="0" required>
                                                 <span class="input-group-text">€</span>
                                             </div>
@@ -1093,11 +1098,13 @@ def new_receipt():
                                         </div>
                                         <div class="mb-3">
                                             <label class="form-label">Behandlungsdatum</label>
-                                            <input type="date" class="form-control" name="treatment_date" id="treatment_date">
+                                            <input type="date" class="form-control" 
+                                                   name="treatment_date" id="treatment_date">
                                         </div>
                                         <div class="mb-3">
                                             <label class="form-label">Patient</label>
-                                            <input type="text" class="form-control" name="patient_name" value="{{ patient_name }}" required>
+                                            <input type="text" class="form-control" 
+                                                   name="patient_name" value="{{ patient_name }}" required>
                                         </div>
                                     </div>
                                 </div>
@@ -1106,20 +1113,23 @@ def new_receipt():
                                     <div class="col-md-6">
                                         <div class="mb-3">
                                             <label class="form-label">Diagnose-Code (ICD-10)</label>
-                                            <input type="text" class="form-control" name="diagnosis_code" placeholder="z.B. M25.5">
+                                            <input type="text" class="form-control" 
+                                                   name="diagnosis_code" placeholder="z.B. M25.5">
                                         </div>
                                     </div>
                                                                     <div class="col-md-6">
                                     <div class="mb-3">
                                         <label class="form-label">Rechnungsnummer</label>
-                                        <input type="text" class="form-control" name="prescription_number" placeholder="Rechnungs- oder Belegnummer">
+                                        <input type="text" class="form-control" 
+                                               name="prescription_number" placeholder="Rechnungs- oder Belegnummer">
                                     </div>
                                 </div>
                                 </div>
 
                                 <div class="mb-4">
                                     <label class="form-label">Notizen</label>
-                                    <textarea class="form-control" name="notes" rows="3" placeholder="Zusätzliche Informationen..."></textarea>
+                                    <textarea class="form-control" name="notes" rows="3" 
+                                              placeholder="Zusätzliche Informationen..."></textarea>
                                 </div>
 
                                 <!-- Submit Buttons -->
@@ -1335,7 +1345,8 @@ def new_receipt():
                     </div>
                     <div class="mb-2">
                         <small class="text-muted">Confidence:</small><br>
-                        <span class="badge bg-${getConfidenceBadge(ocrData.confidence)}">${ocrData.confidence || 0}%</span>
+                        <span class="badge bg-${getConfidenceBadge(ocrData.confidence)}">
+                            ${ocrData.confidence || 0}%</span>
                     </div>
                     <div class="mb-2">
                         <small class="text-muted">OCR-Engine:</small><br>
@@ -1463,7 +1474,8 @@ def new_receipt():
                     if (ibanField) ibanField.value = providerData.iban || '';
                     if (bicField) bicField.value = providerData.bic || '';
 
-                    console.log('✅ Felder gefüllt - Name:', nameField?.value, 'Type:', typeField?.value, 'IBAN:', ibanField?.value);
+                    console.log('✅ Felder gefüllt - Name:', nameField?.value, 
+                                'Type:', typeField?.value, 'IBAN:', ibanField?.value);
 
                     // Visuelles Feedback
                     if (providerData.iban && ibanField) {
@@ -1555,7 +1567,8 @@ def new_receipt():
                             loadProviderData();
 
                             setTimeout(() => {
-                                alert('🎯 Anbieter automatisch erkannt!\\n\\n"' + providerName + '" wurde aus der Datenbank ausgewählt.');
+                                alert('🎯 Anbieter automatisch erkannt!\\n\\n"' + providerName + 
+                                      '" wurde aus der Datenbank ausgewählt.');
                             }, 1000);
                             break;
                         }
@@ -3201,6 +3214,7 @@ def submissions_overview():
     </html>
     """, debeka_submissions=debeka_submissions, beihilfe_submissions=beihilfe_submissions, pending_submissions=pending_submissions)
 
+
 def days_since_payment(payment_date):
     """Hilfsfunktion für Tage seit Zahlung"""
     if not payment_date:
@@ -4083,6 +4097,8 @@ def reimbursements_overview():
     """, reimbursements=reimbursements, total_paid=total_paid, total_reimbursed=total_reimbursed)
 
 # ⚠️ MAHNUNGS-SYSTEM - VOLLSTÄNDIG
+
+
 @app.route('/reminders')
 def reminders_overview():
     """⚠️ Mahnungs-System"""
@@ -4384,6 +4400,7 @@ def reminders_overview():
     </html>
     """, active_reminders=active_reminders, overdue_reminders=overdue_reminders, needs_reminder=needs_reminder)
 
+
 def days_overdue(due_date):
     """Hilfsfunktion für überfällige Tage"""
     if not due_date:
@@ -4394,6 +4411,7 @@ def days_overdue(due_date):
         return max(0, (datetime.now() - due).days)
     except Exception:
         return 0
+
 
 
 def days_since_invoice(receipt_date):
@@ -4577,7 +4595,7 @@ def edit_receipt(receipt_id):
                                         <div class="mb-3">
                                             <label class="form-label">Anbieter auswählen</label>
                                             <div class="input-group">
-                                                <select class="form-select" id="provider_select" 
+                                                <select class="form-select" id="provider_select"
                                                         onchange="loadProviderData()">
                                                     <option value="">Anbieter wählen...</option>
                                                     {% for provider in providers %}
@@ -4587,7 +4605,8 @@ def edit_receipt(receipt_id):
                                                             data-iban="{{ provider.iban or '' }}"
                                                             data-bic="{{ provider.bic or '' }}"
                                                             {{ 'selected' if provider.name == receipt.provider_name }}>
-                                                        {{ provider.name }} ({{ {'doctor': 'Arzt', 'pharmacy': 'Apotheke', 'hospital': 'Krankenhaus', 'specialist': 'Spezialist'}.get(provider.provider_type, provider.provider_type) }})
+                                                        {{ provider.name }} ({{ {'doctor': 'Arzt', 'pharmacy': 'Apotheke', 
+                                                            'hospital': 'Krankenhaus', 'specialist': 'Spezialist'}.get(provider.provider_type, provider.provider_type) }})
                                                     </option>
                                                     {% endfor %}
                                                     <option value="new">➕ Neuer Anbieter...</option>
@@ -4604,7 +4623,8 @@ def edit_receipt(receipt_id):
                                         </div>
                                         <div class="mb-3">
                                             <label class="form-label">Anbieter-Typ *</label>
-                                            <select class="form-select" name="provider_type" id="provider_type" required>
+                                            <select class="form-select" name="provider_type" 
+                                                    id="provider_type" required>
                                                 <option value="doctor" {{ 'selected' if receipt.provider_type == 'doctor' }}>Arzt</option>
                                                 <option value="pharmacy" {{ 'selected' if receipt.provider_type == 'pharmacy' }}>Apotheke</option>
                                                 <option value="hospital" {{ 'selected' if receipt.provider_type == 'hospital' }}>Krankenhaus</option>
@@ -4632,7 +4652,7 @@ def edit_receipt(receipt_id):
                                         <div class="mb-3">
                                             <label class="form-label">Rechnungsbetrag *</label>
                                             <div class="input-group">
-                                                <input type="number" class="form-control" name="amount" value="{{ receipt.amount }}" step="0.01" min="0" required>
+                                                <input type="number" class="form-control" name="amount"value="{{ receipt.amount }}" step="0.01" min="0" required>
                                                 <span class="input-group-text">€</span>
                                             </div>
                                         </div>
@@ -4865,6 +4885,8 @@ def update_receipt(receipt_id):
         return redirect(url_for('edit_receipt', receipt_id=receipt_id))
 
 # 🗑️ BELEG LÖSCHEN - VOLLSTÄNDIG FUNKTIONAL
+
+
 @app.route('/receipt/<receipt_id>/copy')
 def copy_receipt(receipt_id):
     """📋 Beleg kopieren - Erstellt Vorlage für neuen Beleg"""
@@ -4956,7 +4978,7 @@ def copy_receipt(receipt_id):
                                         <div class="mb-3">
                                             <label class="form-label">Anbieter auswählen *</label>
                                             <div class="input-group">
-                                                <select class="form-select" id="provider_select" 
+                                                <select class="form-select" id="provider_select"
                                                         onchange="loadProviderData()">
                                                     <option value="">Anbieter wählen...</option>
                                                     {% for provider in providers %}
@@ -4966,12 +4988,14 @@ def copy_receipt(receipt_id):
                                                             data-iban="{{ provider.iban or '' }}"
                                                             data-bic="{{ provider.bic or '' }}"
                                                             {{ 'selected' if provider.name == original_receipt.provider_name }}>
-                                                        {{ provider.name }} ({{ {'doctor': 'Arzt', 'pharmacy': 'Apotheke', 'hospital': 'Krankenhaus', 'specialist': 'Spezialist'}.get(provider.provider_type, provider.provider_type) }})
+                                                        {{ provider.name }} ({{ {'doctor': 'Arzt', 'pharmacy': 'Apotheke', 
+                                                            'hospital': 'Krankenhaus', 'specialist': 'Spezialist'}.get(provider.provider_type, provider.provider_type) }})
                                                     </option>
                                                     {% endfor %}
                                                     <option value="new">➕ Neuer Anbieter...</option>
                                                 </select>
-                                                <a href="/provider/new" target="_blank" class="btn btn-outline-success" title="Neuen Anbieter erstellen">
+                                                <a href="/provider/new" target="_blank" 
+                                                   class="btn btn-outline-success" title="Neuen Anbieter erstellen">
                                                     <i class="bi bi-plus-circle"></i>
                                                 </a>
                                             </div>
@@ -4983,7 +5007,8 @@ def copy_receipt(receipt_id):
                                         </div>
                                         <div class="mb-3">
                                             <label class="form-label">Anbieter-Typ *</label>
-                                            <select class="form-select" name="provider_type" id="provider_type" required>
+                                            <select class="form-select" name="provider_type" 
+                                                    id="provider_type" required>
                                                 <option value="doctor" {{ 'selected' if original_receipt.provider_type == 'doctor' }}>Arzt</option>
                                                 <option value="pharmacy" {{ 'selected' if original_receipt.provider_type == 'pharmacy' }}>Apotheke</option>
                                                 <option value="hospital" {{ 'selected' if original_receipt.provider_type == 'hospital' }}>Krankenhaus</option>
@@ -5028,7 +5053,8 @@ def copy_receipt(receipt_id):
                                     <div class="col-md-6">
                                         <div class="mb-3">
                                             <label class="form-label">Rechnungsnummer</label>
-                                            <input type="text" class="form-control" name="prescription_number" placeholder="Rechnungs- oder Belegnummer">
+                                            <input type="text" class="form-control" 
+                                               name="prescription_number" placeholder="Rechnungs- oder Belegnummer">
                                         </div>
                                     </div>
                                 </div>
@@ -5903,7 +5929,8 @@ def new_provider():
 
                                 <div class="mb-4">
                                     <label class="form-label">Notizen</label>
-                                    <textarea class="form-control" name="notes" rows="3" placeholder="Zusätzliche Informationen..."></textarea>
+                                    <textarea class="form-control" name="notes" rows="3" 
+                                              placeholder="Zusätzliche Informationen..."></textarea>
                                 </div>
 
                                 <!-- Submit Buttons -->
@@ -6202,10 +6229,15 @@ def delete_provider(provider_id):
         flash('Anbieter erfolgreich gelöscht!', 'success')
         return redirect(url_for('providers_list'))
 
+
+
     except Exception as e:
         logger.error(f"Fehler beim Löschen des Anbieters: {e}")
         flash('Fehler beim Löschen des Anbieters!', 'error')
         return redirect(url_for('providers_list'))
+
+
+if __name__ == '__main__':
 
 if __name__ == "__main__":
     print("\n" + "="*80)
