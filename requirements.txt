@@ -1,0 +1,52 @@
+# Web Framework
+Flask==2.3.3
+Werkzeug==2.3.7
+Flask-SQLAlchemy==3.1.1
+SQLAlchemy==2.0.27
+alembic==1.13.1
+
+# Production Server
+gunicorn==21.2.0; sys_platform != 'win32'  # Für Unix/Linux
+waitress==2.1.2  # Für alle Plattformen (inkl. Windows)
+
+# Bildverarbeitung und OCR
+pytesseract==0.3.13
+pdf2image==1.17.0
+Pillow==11.2.1
+img2pdf==0.6.1
+
+# QR-Code Generierung
+segno==1.5.2
+
+# Datenverarbeitung
+numpy==2.2.5
+pandas==2.2.3
+openpyxl==3.1.5
+python-dateutil==2.9.0.post0
+pytz==2025.2
+tzdata==2025.2
+
+# PDF-Verarbeitung
+pikepdf==9.7.0
+lxml==5.4.0
+
+# HTTP und Netzwerk
+requests==2.32.3
+urllib3==2.4.0
+certifi==2025.4.26
+charset-normalizer==3.4.2
+idna==3.10
+
+# WebDAV-Client
+webdavclient3==3.14.6
+
+# Sonstiges
+six==1.17.0
+Deprecated==1.2.18
+wrapt==1.17.2
+packaging==25.0
+et_xmlfile==2.0.0
+
+# Testen
+pytest==7.4.0
+pytest-flask==1.2.0
