@@ -6237,8 +6237,6 @@ def delete_provider(provider_id):
         return redirect(url_for('providers_list'))
 
 
-if __name__ == '__main__':
-
 if __name__ == "__main__":
     print("\n" + "="*80)
     print("🎯 BELEGMEISTER v1.0 - DER MEISTER IST BEREIT!")
