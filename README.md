@@ -226,3 +226,4 @@ PORT=5031 python3 medical_receipt_tracker.py
 ---
 
 **🏥 Medical Receipt Tracker - Ihre komplette Lösung für medizinische Belege!**
+
